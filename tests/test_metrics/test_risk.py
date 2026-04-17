@@ -263,3 +263,48 @@ class TestCalmarRatio:
         result = metric.compute(np.array([-0.01, -0.02]), context)
         assert result["CalmarRatio"] < 0
 
+
+class TestMetricKeywordOnlyConstructors:
+    """
+    Verify all metric constructors enforce keyword-only arguments.
+
+    This prevents the positional arg trap where SharpeRatio(252, 1000) silently
+    assigns 252 to `name` instead of `trading_days_per_year`.
+
+    Bug discovered 2026-03-16: scripts/run_regression_backtest.py line 54 used
+    SharpeRatio(tdy, ppd) which set name=252.0, trading_days_per_year=1000.0,
+    periods_per_day=1000.0 — inflating all regression Sharpe ratios by ~2x.
+    """
+
+    def test_sharpe_ratio_rejects_positional_args(self):
+        """SharpeRatio(252, 1000) must raise TypeError, not silently corrupt."""
+        with pytest.raises(TypeError):
+            SharpeRatio(252, 1000)
+
+    def test_sharpe_ratio_accepts_keyword_args(self):
+        """SharpeRatio(trading_days_per_year=252, periods_per_day=1000) must work."""
+        metric = SharpeRatio(trading_days_per_year=252, periods_per_day=1000)
+        assert metric.trading_days_per_year == 252
+        assert metric.periods_per_day == 1000
+
+    def test_sharpe_ratio_correct_annualization(self):
+        """Verify annualization_factor = sqrt(252 * 1000) ≈ 501.996."""
+        metric = SharpeRatio(trading_days_per_year=252, periods_per_day=1000)
+        expected = np.sqrt(252 * 1000)
+        assert abs(metric.annualization_factor - expected) < 1e-10
+
+    def test_sortino_ratio_rejects_positional_args(self):
+        """SortinoRatio(252, 1000) must raise TypeError."""
+        with pytest.raises(TypeError):
+            SortinoRatio(252, 1000)
+
+    def test_calmar_ratio_rejects_positional_args(self):
+        """CalmarRatio(252, 1000) must raise TypeError."""
+        with pytest.raises(TypeError):
+            CalmarRatio(252, 1000)
+
+    def test_max_drawdown_rejects_positional_args(self):
+        """MaxDrawdown("custom") must raise TypeError."""
+        with pytest.raises(TypeError):
+            MaxDrawdown("custom_name")
+

@@ -1,0 +1,47 @@
+# E1: Deep ITM 0DTE Backtest — TLOB Regression H10
+#
+# Hypothesis: TLOB regression model produces positive option P&L
+# at deep ITM (delta≈0.95, breakeven 1.4 bps) with conviction filtering.
+#
+# Decision Gate:
+#   PASS: option_total_return > 0% at any threshold
+#   WARN: -2% to 0% (marginal)
+#   FAIL: < -5% (signal insufficient)
+#
+# Reference: BACKTESTER_AUDIT_PLAN.md § E1
+#            p0_label_execution_validation_2026_03_17.md
+#            IBKR_REAL_WORLD_TRADING_REPORT.md § Deep ITM breakeven
+
+experiment:
+  name: "E1_deep_itm_tlob_regression_h10"
+  description: "Deep ITM 0DTE (delta=0.95): conviction sweep 0.7-10 bps, H10 hold, fixed engine"
+
+signals:
+  dir: "../lob-model-trainer/outputs/experiments/nvda_tlob_128feat_regression_h10/signals/test"
+
+backtest:
+  initial_capital: 100000
+  position_size: 0.1
+  allow_short: false
+  exchange: "XNAS"
+
+strategy:
+  type: "regression"
+  max_spread_bps: 1.05
+  primary_horizon_idx: 0
+
+holding:
+  type: "horizon_aligned"
+  hold_events: 10
+
+zero_dte:
+  enabled: true
+  delta: 0.95
+  commission_per_contract: 0.63
+
+sweep:
+  min_return_bps: [0.7, 1.0, 2.0, 3.0, 5.0, 8.0, 10.0]
+
+output:
+  dir: "outputs/backtests/e1_deep_itm"
+  save_equity_curve: true

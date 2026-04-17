@@ -10,10 +10,10 @@ This library provides a **vectorized backtesting engine** for evaluating directi
 
 ### Key Features
 
-- **Vectorized Engine**: Fast numpy-based computation, no event-driven loops
+- **Per-Sample Engine**: Position tracking with numpy-based metrics (fast for ~50K-sample backtests)
 - **Metric ABC Pattern**: Composable, extensible metrics inspired by `hftbacktest`
 - **Fluent Stats API**: Chain operations for intuitive usage
-- **ML-Focused Metrics**: DirectionalAccuracy, PredictionConfidence, SignalQuality
+- **ML-Focused Metrics**: DirectionalAccuracy, SignalRate, UpPrecision, DownPrecision
 - **Trading Metrics**: Sharpe, Sortino, MaxDrawdown, WinRate, ProfitFactor
 - **Transaction Costs**: Configurable spread, slippage, commission
 - **Multi-Model Comparison**: Compare multiple models side-by-side
@@ -108,18 +108,25 @@ lob-backtester/
 │   │   └── prices.py         # Denormalize prices from features
 │   │
 │   ├── strategies/           # Trading strategy implementations
-│   │   ├── base.py           # Strategy ABC
-│   │   └── direction.py      # Direction-based strategies
+│   │   ├── base.py           # Strategy ABC, Signal enum
+│   │   ├── direction.py      # DirectionStrategy, ThresholdStrategy
+│   │   ├── readability.py    # ReadabilityStrategy (HMHP agreement + confidence)
+│   │   ├── regression.py     # RegressionStrategy (magnitude gate)
+│   │   ├── hybrid.py         # ReadabilityHybridStrategy (classification + regression)
+│   │   ├── holding.py        # HoldingPolicy, HorizonAlignedPolicy
+│   │   └── twap.py           # TWAPStrategy (time-weighted execution)
 │   │
 │   ├── engine/               # Backtest execution engines
-│   │   └── vectorized.py     # Vectorized numpy engine, Backtester
+│   │   ├── vectorized.py     # VectorizedEngine, Backtester, BacktestData
+│   │   └── zero_dte.py       # ZeroDtePnLTransformer (0DTE options P&L)
 │   │
 │   ├── metrics/              # Performance metrics
 │   │   ├── base.py           # Metric ABC
 │   │   ├── returns.py        # Return-based metrics
 │   │   ├── risk.py           # Risk metrics (Sharpe, Sortino, Drawdown)
 │   │   ├── trading.py        # Trading metrics (WinRate, ProfitFactor)
-│   │   └── prediction.py     # ML prediction metrics
+│   │   ├── prediction.py     # ML prediction metrics (DirectionalAccuracy, SignalRate)
+│   │   └── regression_prediction.py  # Regression metrics (MSE, IC, Correlation)
 │   │
 │   ├── stats/                # Statistics and aggregation
 │   │   └── stats.py          # Fluent Stats API
@@ -281,5 +288,5 @@ Proprietary - All Rights Reserved.
 
 ---
 
-*Last updated: December 28, 2025*
+*Last updated: March 16, 2026*
 

@@ -37,12 +37,16 @@ class SharpeRatio(Metric):
 
     def __init__(
         self,
+        *,
         name: str = None,
         trading_days_per_year: float = 252.0,
         periods_per_day: float = 1000.0,
     ):
         """
         Initialize SharpeRatio metric.
+
+        All parameters are keyword-only to prevent the positional arg trap
+        where SharpeRatio(252, 1000) silently assigns 252 to `name`.
 
         Args:
             name: Optional custom name (default: "SharpeRatio")
@@ -135,12 +139,15 @@ class SortinoRatio(Metric):
 
     def __init__(
         self,
+        *,
         name: str = None,
         trading_days_per_year: float = 252.0,
         periods_per_day: float = 1000.0,
     ):
         """
         Initialize SortinoRatio metric.
+
+        All parameters are keyword-only (see SharpeRatio docstring for rationale).
 
         Args:
             name: Optional custom name (default: "SortinoRatio")
@@ -230,7 +237,7 @@ class MaxDrawdown(Metric):
         - Requires equity_curve in context (computed from returns if not present)
     """
 
-    def __init__(self, name: str = None):
+    def __init__(self, *, name: str = None):
         """
         Initialize MaxDrawdown metric.
 
@@ -315,12 +322,15 @@ class CalmarRatio(Metric):
 
     def __init__(
         self,
+        *,
         name: str = None,
         trading_days_per_year: float = 252.0,
         periods_per_day: float = 1000.0,
     ):
         """
         Initialize CalmarRatio metric.
+
+        All parameters are keyword-only (see SharpeRatio docstring for rationale).
 
         Args:
             name: Optional custom name (default: "CalmarRatio")

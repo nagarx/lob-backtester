@@ -24,13 +24,16 @@ import json
 
 import numpy as np
 
+from hft_contracts import FeatureIndex
+from hft_contracts.validation import ContractError
 
-# Feature indices (consistent with feature-extractor-MBO-LOB)
-ASK_PRICES_START = 0
-ASK_PRICES_END = 10
-BID_PRICES_START = 20
-BID_PRICES_END = 30
-MID_PRICE_INDEX = 40  # Derived feature index
+
+# Feature indices derived from the contract (single source of truth)
+ASK_PRICES_START = int(FeatureIndex.ASK_PRICE_L0)
+ASK_PRICES_END = int(FeatureIndex.ASK_PRICE_L9) + 1
+BID_PRICES_START = int(FeatureIndex.BID_PRICE_L0)
+BID_PRICES_END = int(FeatureIndex.BID_PRICE_L9) + 1
+MID_PRICE_INDEX = int(FeatureIndex.MID_PRICE)
 
 
 @dataclass
@@ -60,16 +63,37 @@ class NormalizationParams:
 
     @classmethod
     def from_json(cls, path: Union[str, Path]) -> "NormalizationParams":
-        """Load normalization params from JSON file."""
+        """
+        Load normalization params from JSON file.
+
+        Validates the normalization boundary contract: if the exporter reports
+        normalization_applied=false, the stats must be identity (means=0, stds=1).
+        """
         with open(path, "r") as f:
             data = json.load(f)
 
+        price_means = np.array(data.get("price_means", []))
+        price_stds = np.array(data.get("price_stds", []))
+        size_means = np.array(data.get("size_means", []))
+        size_stds = np.array(data.get("size_stds", []))
+
+        norm_applied = data.get("normalization_applied", False)
+        if not norm_applied:
+            all_means = np.concatenate([price_means, size_means]) if len(price_means) > 0 and len(size_means) > 0 else price_means
+            all_stds = np.concatenate([price_stds, size_stds]) if len(price_stds) > 0 and len(size_stds) > 0 else price_stds
+            if len(all_means) > 0 and (not np.allclose(all_means, 0.0) or not np.allclose(all_stds, 1.0)):
+                raise ContractError(
+                    "normalization_applied=false but normalization stats are "
+                    "non-identity. The exporter may have changed its normalization "
+                    "strategy without updating the metadata field."
+                )
+
         return cls(
             strategy=data.get("strategy", "market_structure_zscore"),
-            price_means=np.array(data.get("price_means", [])),
-            price_stds=np.array(data.get("price_stds", [])),
-            size_means=np.array(data.get("size_means", [])),
-            size_stds=np.array(data.get("size_stds", [])),
+            price_means=price_means,
+            price_stds=price_stds,
+            size_means=size_means,
+            size_stds=size_stds,
             sample_count=data.get("sample_count", 0),
             levels=data.get("levels", 10),
         )

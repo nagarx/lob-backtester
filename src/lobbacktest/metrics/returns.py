@@ -27,7 +27,7 @@ class TotalReturn(Metric):
         Standard financial return calculation
     """
 
-    def __init__(self, name: str = None):
+    def __init__(self, *, name: str = None):
         """
         Initialize TotalReturn metric.
 
@@ -85,12 +85,15 @@ class AnnualReturn(Metric):
 
     def __init__(
         self,
+        *,
         name: str = None,
         trading_days_per_year: float = 252.0,
         periods_per_day: float = 1000.0,
     ):
         """
         Initialize AnnualReturn metric.
+
+        All parameters are keyword-only (see SharpeRatio docstring for rationale).
 
         Args:
             name: Optional custom name (default: "AnnualReturn")

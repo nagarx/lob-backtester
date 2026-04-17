@@ -115,6 +115,7 @@ class Position:
     entry_price: float
     entry_index: int
     unrealized_pnl: float = 0.0
+    entry_cost: float = 0.0  # Transaction cost at entry (for accurate trade_pnls)
 
     def __post_init__(self) -> None:
         """Validate position invariants."""

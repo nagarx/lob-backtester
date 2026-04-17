@@ -1,17 +1,22 @@
 """
-Vectorized backtest engine.
+Backtest engine with per-sample position tracking.
 
-This engine executes backtests using numpy operations for speed.
-It assumes instant fill at the current price (no queue simulation).
+This engine executes backtests using a per-sample loop for explicit position
+tracking, with numpy-based metric computation. It assumes instant fill at
+the current price (no queue simulation).
+
+Note: Module is named 'vectorized.py' for historical reasons.
+The main engine loop is a Python for-loop, not vectorized.
 
 Design Philosophy:
-- All computation is vectorized (no Python loops in hot paths)
-- Position tracking is explicit and auditable
-- Transaction costs are modeled explicitly
+- Position tracking is explicit and auditable (per-sample loop)
+- Transaction costs are modeled explicitly (entry + exit costs)
+- Short and long positions have symmetric sizing and accounting
 - Results include all information needed for analysis
 """
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -42,11 +47,21 @@ class BacktestData:
         prices: Mid-price series (shape: N)
         labels: True labels if available (shape: N)
         timestamps_ns: Optional timestamps in nanoseconds (shape: N)
+        predictions: Model predictions (shape: N), 0=Down, 1=Stable, 2=Up
+        spreads: Bid-ask spread in bps (shape: N)
+        agreement_ratio: HMHP cross-horizon agreement (shape: N), in [0.333, 1.0]
+        confirmation_score: HMHP decoder confidence (shape: N), in [0, 0.667]
     """
 
     prices: np.ndarray
     labels: Optional[np.ndarray] = None
     timestamps_ns: Optional[np.ndarray] = None
+    predictions: Optional[np.ndarray] = None
+    spreads: Optional[np.ndarray] = None
+    agreement_ratio: Optional[np.ndarray] = None
+    confirmation_score: Optional[np.ndarray] = None
+    predicted_returns: Optional[np.ndarray] = None
+    regression_labels: Optional[np.ndarray] = None
 
     def __post_init__(self) -> None:
         """Validate data."""
@@ -61,6 +76,73 @@ class BacktestData:
 
     def __len__(self) -> int:
         return len(self.prices)
+
+    @classmethod
+    def from_signal_dir(
+        cls,
+        signal_dir: str,
+        *,
+        validate: bool = True,
+    ) -> "BacktestData":
+        """Load BacktestData from a directory of exported signal arrays.
+
+        Loads .npy files produced by the trainer's signal export scripts
+        (export_hmhp_signals.py, export_regression_signals.py, etc.).
+
+        When validate=True (default), reads signal_metadata.json and checks:
+        - Required files exist (ContractError if missing)
+        - All arrays have aligned first dimension (ContractError if mismatched)
+        - No NaN/Inf in required arrays (ContractError if found)
+        - Value ranges are sensible (warnings for anomalies)
+
+        Args:
+            signal_dir: Path to directory containing .npy signal arrays.
+            validate: If True, validate signal contract at load time.
+                Set to False for legacy code or manual testing.
+
+        Returns:
+            BacktestData populated with all available arrays.
+
+        Raises:
+            ContractError: If validation=True and critical contract
+                violation detected (missing files, shape mismatch, etc.).
+        """
+        d = Path(signal_dir)
+
+        # Validate signal contract before loading
+        if validate:
+            from lobbacktest.data.signal_manifest import SignalManifest
+
+            manifest = SignalManifest.from_signal_dir(d)
+            warnings = manifest.validate(d)
+            for w in warnings:
+                print(f"  ⚠️  Signal validation: {w}")
+
+        prices = np.load(d / "prices.npy")
+        labels = np.load(d / "labels.npy") if (d / "labels.npy").exists() else None
+        predictions = np.load(d / "predictions.npy") if (d / "predictions.npy").exists() else None
+        spreads = np.load(d / "spreads.npy") if (d / "spreads.npy").exists() else None
+        agreement = np.load(d / "agreement_ratio.npy") if (d / "agreement_ratio.npy").exists() else None
+        confirmation = np.load(d / "confirmation_score.npy") if (d / "confirmation_score.npy").exists() else None
+        # Prefer calibrated predictions if available (E6+)
+        if (d / "calibrated_returns.npy").exists():
+            predicted_returns = np.load(d / "calibrated_returns.npy")
+        elif (d / "predicted_returns.npy").exists():
+            predicted_returns = np.load(d / "predicted_returns.npy")
+        else:
+            predicted_returns = None
+        regression_labels = np.load(d / "regression_labels.npy") if (d / "regression_labels.npy").exists() else None
+
+        return cls(
+            prices=prices,
+            labels=labels,
+            predictions=predictions,
+            spreads=spreads,
+            agreement_ratio=agreement,
+            confirmation_score=confirmation,
+            predicted_returns=predicted_returns,
+            regression_labels=regression_labels,
+        )
 
 
 class VectorizedEngine:
@@ -157,7 +239,8 @@ class VectorizedEngine:
                     # Close short position first
                     cash_flow, cost, pnl = self._close_position(current_position, price)
                     cash += cash_flow - cost
-                    trade_pnls.append(pnl - cost)  # Record actual P&L (after costs)
+                    # P2 FIX: Include BOTH entry and exit costs in trade_pnls
+                    trade_pnls.append(pnl - cost - current_position.entry_cost)
                     trades.append(
                         Trade(
                             index=i,
@@ -183,6 +266,7 @@ class VectorizedEngine:
                             size=size,
                             entry_price=price,
                             entry_index=i,
+                            entry_cost=cost,  # P2 FIX: Store entry cost for trade_pnls
                         )
                         trades.append(
                             Trade(
@@ -203,7 +287,8 @@ class VectorizedEngine:
                         # Close long position first
                         cash_flow, cost, pnl = self._close_position(current_position, price)
                         cash += cash_flow - cost
-                        trade_pnls.append(pnl - cost)  # Record actual P&L (after costs)
+                        # P2 FIX: Include BOTH entry and exit costs in trade_pnls
+                        trade_pnls.append(pnl - cost - current_position.entry_cost)
                         trades.append(
                             Trade(
                                 index=i,
@@ -217,23 +302,20 @@ class VectorizedEngine:
 
                     if current_position.is_flat and self.config.allow_short:
                         # Open short position
-                        # For shorts, we RECEIVE cash from selling borrowed shares
-                        # But we need to maintain margin/collateral
+                        # C3 FIX: Symmetric with longs — deduct BOTH position_value AND cost
+                        # Position value acts as margin collateral for the short
                         size = self._compute_position_size(cash, price)
                         if size > 0:
                             position_value = size * price
                             cost = self.config.costs.compute_cost(position_value)
-                            # For shorts: we receive position_value (from selling)
-                            # but deduct cost. Cash increases by (value - cost)
-                            # However, we also need to track that we owe those shares
-                            # For simplicity, we treat shorts same as longs accounting-wise
-                            # (deduct position value as "margin")
-                            cash -= cost  # Only cost for shorts (margin is tracked via position)
+                            # C3 FIX: Deduct position_value as margin + cost (same as longs)
+                            cash -= (position_value + cost)
                             current_position = Position(
                                 side=PositionSide.SHORT,
                                 size=size,
                                 entry_price=price,
                                 entry_index=i,
+                                entry_cost=cost,  # P2 FIX: Store entry cost for trade_pnls
                             )
                             trades.append(
                                 Trade(
@@ -249,7 +331,8 @@ class VectorizedEngine:
                 if not current_position.is_flat:
                     cash_flow, cost, pnl = self._close_position(current_position, price)
                     cash += cash_flow - cost
-                    trade_pnls.append(pnl - cost)  # Record actual P&L (after costs)
+                    # P2 FIX: Include BOTH entry and exit costs in trade_pnls
+                    trade_pnls.append(pnl - cost - current_position.entry_cost)
                     trades.append(
                         Trade(
                             index=i,
@@ -272,15 +355,14 @@ class VectorizedEngine:
                     current_value = price * current_position.size
                     equity[i] = cash + current_value
                 else:
-                    # Short position: we owe shares at current price
-                    # We received entry_price * size when opening
-                    # But cash only decreased by cost, so need to add proceeds
-                    # Net equity = cash + proceeds_from_short - current_liability
-                    #            = cash + entry_price * size - current_price * size
-                    #            = cash + (entry - current) * size
-                    #            = cash + unrealized_pnl
+                    # Short position: C3 FIX — margin (entry_price * size) deducted at entry.
+                    # Equity = cash + margin_held + unrealized_pnl
+                    #        = cash + entry_price * size + (entry_price - current_price) * size
+                    #        = cash + entry_price * size * 2 - current_price * size
+                    # Simplified: equity = cash + margin + pnl
+                    margin = current_position.entry_price * current_position.size
                     unrealized = (current_position.entry_price - price) * current_position.size
-                    equity[i] = cash + unrealized
+                    equity[i] = cash + margin + unrealized
             else:
                 equity[i] = cash
 
@@ -289,7 +371,8 @@ class VectorizedEngine:
             final_price = prices[-1]
             cash_flow, cost, pnl = self._close_position(current_position, final_price)
             cash += cash_flow - cost
-            trade_pnls.append(pnl - cost)  # Record actual P&L (after costs)
+            # P2 FIX: Include entry cost in trade_pnls
+            trade_pnls.append(pnl - cost - current_position.entry_cost)
             equity[-1] = cash
 
         # Compute returns
@@ -406,16 +489,17 @@ class VectorizedEngine:
         cost = self.config.costs.compute_cost(position.size * price)
 
         if position.is_long:
-            # Selling shares: receive full proceeds
+            # Selling shares: receive full proceeds (return position_value + P&L)
             cash_flow = price * position.size
             # P&L = (exit - entry) * size
             pnl = (price - position.entry_price) * position.size
         else:  # Short
-            # Buying back shares: the cash change is just the P&L
-            # (we added entry*size when opening, now we pay price*size)
-            cash_flow = (position.entry_price - price) * position.size
-            # P&L = (entry - exit) * size
+            # C3 FIX: Since we deducted position_value as margin at entry,
+            # we now return margin + P&L at close.
+            # P&L = (entry - exit) * size (positive when price drops)
             pnl = (position.entry_price - price) * position.size
+            # Return margin (entry_price * size) + P&L
+            cash_flow = position.entry_price * position.size + pnl
 
         return cash_flow, cost, pnl
 
@@ -442,17 +526,19 @@ class VectorizedEngine:
         Returns:
             Dict of metric name to value
         """
-        # Build context
-        context = {
-            "equity_curve": equity_curve,
-            "trade_pnls": trade_pnls,
-            "predictions": predictions,
-            "labels": labels,
-            "initial_capital": self.config.initial_capital,
-            "trading_days_per_year": self.config.trading_days_per_year,
-            "periods_per_day": self.config.periods_per_day,
-            "annualization_factor": self.config.annualization_factor,
-        }
+        # Build typed context (backward compatible with dict access)
+        from lobbacktest.context import BacktestContext
+
+        context = BacktestContext(
+            equity_curve=equity_curve,
+            trade_pnls=trade_pnls,
+            predictions=predictions,
+            labels=labels,
+            initial_capital=self.config.initial_capital,
+            trading_days_per_year=self.config.trading_days_per_year,
+            periods_per_day=self.config.periods_per_day,
+            annualization_factor=self.config.annualization_factor,
+        )
 
         # Default metrics if none provided
         if metrics is None:

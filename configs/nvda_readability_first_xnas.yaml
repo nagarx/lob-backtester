@@ -1,0 +1,87 @@
+# =============================================================================
+# Readability-First 0DTE Strategy: NVDA XNAS
+# =============================================================================
+#
+# Strategy: Trade only when the microstructure is readable and predictable.
+# Even a tiny directional move is profitable with 0DTE ATM option leverage.
+#
+# Model: HMHP 40-feature (short_term_40 preset)
+#   - Best readability-conditioned accuracy: 95.50% directional at FULL_READABILITY
+#   - More precise than 119-feature model (94.07%) despite fewer features
+#
+# Entry gates (ALL must be true):
+#   1. spread <= 1 tick (OFI r=0.546 at 1-tick vs 0.365 at 2-tick, profiler)
+#   2. agreement_ratio = 1.0 (all horizons agree = market is readable)
+#   3. confirmation_score > 0.65 (decoder confidence high)
+#   4. prediction is directional (Up or Down, not Stable)
+#
+# Expected trade rate: 28.6% of all prediction windows (from test set analysis)
+# Expected directional accuracy: 95.50% on trades taken
+#
+# Exchange costs calibrated from mbo-statistical-profiler (233-day empirical):
+#   XNAS VWES = 1.97 bps, spread typically 1 tick
+#
+# =============================================================================
+
+# Model checkpoint
+model:
+  checkpoint: "../lob-model-trainer/outputs/experiments/nvda_hmhp_40feat_h10/checkpoints/best.pt"
+  config: "../lob-model-trainer/outputs/experiments/nvda_hmhp_40feat_h10/config.yaml"
+  type: hmhp
+
+# Data
+data:
+  data_dir: "../data/exports/nvda_xnas_128feat"
+  split: test
+  feature_count: 128
+  feature_preset: short_term_40
+
+# Backtest configuration
+backtest:
+  initial_capital: 100000.0
+  position_size: 0.1
+  max_position: 1.0
+  allow_short: true
+  fill_price: midpoint
+  trading_days_per_year: 252
+  periods_per_day: 1000
+
+  # Exchange-calibrated costs (XNAS, from profiler)
+  costs:
+    exchange: XNAS
+    spread_bps: 1.0
+    slippage_bps: 1.97
+    taker_fee_bps: 0.30
+    maker_rebate_bps: -0.20
+    commission_per_trade: 0.0
+
+  # Readability gates
+  min_agreement: 1.0
+  min_confidence: 0.65
+
+  # 0DTE options simulation (IBKR+OPRA calibrated)
+  zero_dte:
+    enabled: true
+    delta: 0.50
+    max_holding_minutes: 60.0
+    target_holding_minutes: 15.0
+    contracts_per_trade: 1
+    prefer_calls: true
+    entry_window_start_et: "14:00"
+    entry_window_end_et: "15:30"
+    opra_costs:
+      atm_call_half_spread: 0.015   # $0.030/2, OPRA median
+      atm_put_half_spread: 0.010    # $0.020/2, OPRA median
+      atm_call_premium: 1.88        # OPRA median, validated by IBKR $1.86
+      atm_put_premium: 1.31         # OPRA median
+      commission_per_contract: 0.70  # IBKR 318-fill median (all-inclusive)
+      implied_vol: 0.40             # OPRA GreeksTracker median
+      entry_minutes_before_close: 120.0  # 14:00 ET entry
+
+tags:
+  - nvda
+  - xnas
+  - readability-first
+  - 0dte
+  - 40-features
+  - hmhp

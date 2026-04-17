@@ -1,0 +1,70 @@
+# =============================================================================
+# Readability-First 0DTE Strategy: NVDA ARCX
+# =============================================================================
+#
+# Same strategy as XNAS but on ARCX exchange.
+# ARCX has thinner book -> sharper signals but fewer events.
+# 119-feat ARCX model achieved 97.21% directional accuracy at high conviction.
+# 40-feat ARCX model not yet trained (recommended next experiment).
+#
+# For now, uses the 119-feat ARCX model.
+# ARCX costs are lower (VWES=1.10 bps vs XNAS 1.97 bps).
+#
+# =============================================================================
+
+model:
+  checkpoint: "../lob-model-trainer/outputs/experiments/nvda_hmhp_128feat_arcx_h10/checkpoints/best.pt"
+  config: "../lob-model-trainer/outputs/experiments/nvda_hmhp_128feat_arcx_h10/config.yaml"
+  type: hmhp
+
+data:
+  data_dir: "../data/exports/nvda_arcx_128feat"
+  split: test
+  feature_count: 128
+  feature_preset: analysis_ready_128
+
+backtest:
+  initial_capital: 100000.0
+  position_size: 0.1
+  max_position: 1.0
+  allow_short: true
+  fill_price: midpoint
+  trading_days_per_year: 252
+  periods_per_day: 1000
+
+  costs:
+    exchange: ARCX
+    spread_bps: 1.0
+    slippage_bps: 1.10
+    taker_fee_bps: 0.25
+    maker_rebate_bps: -0.15
+    commission_per_trade: 0.0
+
+  min_agreement: 1.0
+  min_confidence: 0.65
+
+  zero_dte:
+    enabled: true
+    delta: 0.50
+    max_holding_minutes: 60.0
+    target_holding_minutes: 15.0
+    contracts_per_trade: 1
+    prefer_calls: true
+    entry_window_start_et: "14:00"
+    entry_window_end_et: "15:30"
+    opra_costs:
+      atm_call_half_spread: 0.015
+      atm_put_half_spread: 0.010
+      atm_call_premium: 1.88
+      atm_put_premium: 1.31
+      commission_per_contract: 0.70
+      implied_vol: 0.40
+      entry_minutes_before_close: 120.0
+
+tags:
+  - nvda
+  - arcx
+  - readability-first
+  - 0dte
+  - 119-features
+  - hmhp

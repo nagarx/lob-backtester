@@ -34,7 +34,7 @@ class WinRate(Metric):
         - Requires "trade_pnls" in context
     """
 
-    def __init__(self, name: str = None):
+    def __init__(self, *, name: str = None):
         """
         Initialize WinRate metric.
 
@@ -98,7 +98,7 @@ class ProfitFactor(Metric):
         - Requires "trade_pnls" in context
     """
 
-    def __init__(self, name: str = None):
+    def __init__(self, *, name: str = None):
         """
         Initialize ProfitFactor metric.
 
@@ -165,7 +165,7 @@ class AverageWin(Metric):
         Standard trading metric
     """
 
-    def __init__(self, name: str = None):
+    def __init__(self, *, name: str = None):
         """
         Initialize AverageWin metric.
 
@@ -226,7 +226,7 @@ class AverageLoss(Metric):
         - Returns positive value (magnitude of average loss)
     """
 
-    def __init__(self, name: str = None):
+    def __init__(self, *, name: str = None):
         """
         Initialize AverageLoss metric.
 
@@ -292,7 +292,7 @@ class PayoffRatio(Metric):
         - Combined with WinRate for expectancy
     """
 
-    def __init__(self, name: str = None):
+    def __init__(self, *, name: str = None):
         """
         Initialize PayoffRatio metric.
 
@@ -373,7 +373,7 @@ class Expectancy(Metric):
         - Measured in same units as P&L (USD)
     """
 
-    def __init__(self, name: str = None):
+    def __init__(self, *, name: str = None):
         """
         Initialize Expectancy metric.
 

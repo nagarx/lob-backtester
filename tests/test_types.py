@@ -177,6 +177,31 @@ class TestPosition:
         assert not pos.is_long
         assert pos.notional == 5000.0
 
+    def test_position_entry_cost_default_zero(self):
+        """P2 FIX: entry_cost defaults to 0.0 for backward compatibility."""
+        pos = Position(
+            side=PositionSide.LONG,
+            size=100.0,
+            entry_price=50.0,
+            entry_index=0,
+        )
+        assert pos.entry_cost == 0.0, (
+            f"Default entry_cost should be 0.0, got {pos.entry_cost}"
+        )
+
+    def test_position_entry_cost_stored(self):
+        """P2 FIX: entry_cost is stored and retrievable."""
+        pos = Position(
+            side=PositionSide.LONG,
+            size=100.0,
+            entry_price=50.0,
+            entry_index=0,
+            entry_cost=1.5,
+        )
+        assert pos.entry_cost == 1.5, (
+            f"entry_cost should be 1.5, got {pos.entry_cost}"
+        )
+
     def test_flat_position_invariant_size_must_be_zero(self):
         """Test that FLAT position with non-zero size raises error."""
         with pytest.raises(ValueError, match="FLAT position must have size=0"):

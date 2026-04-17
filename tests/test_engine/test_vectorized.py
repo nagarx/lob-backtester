@@ -259,6 +259,159 @@ class TestVectorizedEngine:
         assert "MaxDrawdown" in result.metrics
 
 
+class TestTradePnlCosts:
+    """P2 FIX: trade_pnls must include BOTH entry and exit costs."""
+
+    def test_trade_pnl_includes_both_entry_and_exit_cost(self):
+        """Long trade P&L: gross_pnl - entry_cost - exit_cost.
+
+        BUY at 100 (entry_cost), price rises to 110, SELL (exit_cost).
+        gross_pnl = (110 - 100) * size = positive
+        trade_pnl = gross_pnl - entry_cost - exit_cost
+        """
+        prices = np.array([100.0, 110.0, 110.0])
+        predictions = np.array([1, -1, 0])  # BUY, SELL, HOLD (signed)
+
+        config = BacktestConfig(
+            initial_capital=100_000.0,
+            position_size=0.1,
+            costs=CostConfig(spread_bps=10.0, slippage_bps=0.0),  # 10 bps = measurable cost
+        )
+        data = BacktestData(prices=prices)
+        strategy = DirectionStrategy(predictions, shifted=False)
+
+        engine = VectorizedEngine(config)
+        result = engine.run(data, strategy)
+
+        assert len(result.trade_pnls) >= 1, "Should have at least 1 closed trade"
+        # With costs, trade_pnl should be LESS than gross_pnl
+        # Gross pnl for a 10% position: 0.1 * 100000 * (110-100)/100 = 1000
+        # Entry cost: 10 bps on 10000 notional = 10
+        # Exit cost: 10 bps on 11000 notional = 11
+        # trade_pnl ≈ 1000 - 10 - 11 = 979
+        trade_pnl = result.trade_pnls[0]
+        assert trade_pnl < 1000, (
+            f"trade_pnl ({trade_pnl:.2f}) should be less than gross pnl (1000) "
+            f"because entry+exit costs should be deducted"
+        )
+        assert trade_pnl > 0, f"Trade should still be profitable, got {trade_pnl:.2f}"
+
+    def test_trade_pnl_short_includes_entry_cost(self):
+        """Short trade P&L includes entry cost (symmetric with long)."""
+        prices = np.array([110.0, 100.0, 100.0])
+        predictions = np.array([-1, 1, 0])  # SELL (short), BUY (close), HOLD
+
+        config = BacktestConfig(
+            initial_capital=100_000.0,
+            position_size=0.1,
+            allow_short=True,
+            costs=CostConfig(spread_bps=10.0, slippage_bps=0.0),
+        )
+        data = BacktestData(prices=prices)
+        strategy = DirectionStrategy(predictions, shifted=False)
+
+        engine = VectorizedEngine(config)
+        result = engine.run(data, strategy)
+
+        assert len(result.trade_pnls) >= 1, "Should have closed the short"
+        trade_pnl = result.trade_pnls[0]
+        # Short profit: (110-100)*size = positive, minus entry+exit costs
+        assert trade_pnl > 0, f"Short should be profitable, got {trade_pnl:.2f}"
+        # Must be less than gross because costs are deducted
+        gross_approx = 0.1 * 100_000 * (110 - 100) / 110
+        assert trade_pnl < gross_approx, (
+            f"trade_pnl ({trade_pnl:.2f}) should be less than gross ({gross_approx:.2f}) "
+            f"due to entry+exit costs"
+        )
+
+
+class TestShortSizingSymmetry:
+    """C3 FIX: Shorts and longs must have symmetric sizing and accounting."""
+
+    def test_long_short_sizing_symmetry(self):
+        """Same capital → approximately same position size for long and short."""
+        # Long: BUY at 100
+        prices_long = np.array([100.0, 100.0])
+        preds_long = np.array([1, 0])
+        # Short: SELL at 100
+        prices_short = np.array([100.0, 100.0])
+        preds_short = np.array([-1, 0])
+
+        config = BacktestConfig(
+            initial_capital=100_000.0,
+            position_size=0.1,
+            allow_short=True,
+            costs=CostConfig(spread_bps=0, slippage_bps=0),
+        )
+
+        engine = VectorizedEngine(config)
+
+        result_long = engine.run(
+            BacktestData(prices=prices_long),
+            DirectionStrategy(preds_long, shifted=False),
+        )
+        result_short = engine.run(
+            BacktestData(prices=prices_short),
+            DirectionStrategy(preds_short, shifted=False),
+        )
+
+        long_size = result_long.trades[0].size if result_long.trades else 0
+        short_size = result_short.trades[0].size if result_short.trades else 0
+
+        assert long_size > 0, "Long should open"
+        assert short_size > 0, "Short should open"
+        assert long_size == short_size, (
+            f"C3 FIX: Long size ({long_size}) should equal short size ({short_size}). "
+            f"Both use same capital and position_size fraction."
+        )
+
+    def test_round_trip_long_and_short_equal_pnl(self):
+        """Long +10% and short profiting from -10% should have same absolute P&L.
+
+        Long: BUY at 100, price goes to 110 → +10% profit
+        Short: SELL at 110, price goes to 100 → +10% profit
+        With symmetric sizing and costs, P&L should be approximately equal.
+        """
+        # Long: BUY at 100, SELL at 110
+        prices_long = np.array([100.0, 110.0, 110.0])
+        preds_long = np.array([1, -1, 0])
+
+        # Short: SELL at 110, BUY at 100
+        prices_short = np.array([110.0, 100.0, 100.0])
+        preds_short = np.array([-1, 1, 0])
+
+        config = BacktestConfig(
+            initial_capital=100_000.0,
+            position_size=0.1,
+            allow_short=True,
+            costs=CostConfig(spread_bps=0, slippage_bps=0),
+        )
+
+        engine = VectorizedEngine(config)
+
+        result_long = engine.run(
+            BacktestData(prices=prices_long),
+            DirectionStrategy(preds_long, shifted=False),
+        )
+        result_short = engine.run(
+            BacktestData(prices=prices_short),
+            DirectionStrategy(preds_short, shifted=False),
+        )
+
+        long_pnl = result_long.trade_pnls[0] if len(result_long.trade_pnls) > 0 else 0
+        short_pnl = result_short.trade_pnls[0] if len(result_short.trade_pnls) > 0 else 0
+
+        assert long_pnl > 0, f"Long should be profitable, got {long_pnl:.2f}"
+        assert short_pnl > 0, f"Short should be profitable, got {short_pnl:.2f}"
+
+        # Allow small difference due to different notionals at entry
+        ratio = long_pnl / short_pnl if short_pnl > 0 else float('inf')
+        assert 0.85 < ratio < 1.15, (
+            f"C3 FIX: Long P&L ({long_pnl:.2f}) and short P&L ({short_pnl:.2f}) "
+            f"should be approximately equal (ratio={ratio:.3f})"
+        )
+
+
 class TestBacktester:
     """Tests for Backtester convenience wrapper."""
 

@@ -1,0 +1,38 @@
+# E1 Comparison: ATM 0DTE — Same signals, ATM cost structure
+#
+# Purpose: Baseline comparison for deep ITM experiment.
+# ATM breakeven: 5.4 bps (vs deep ITM 1.4 bps)
+
+experiment:
+  name: "E1_atm_comparison_tlob_regression_h10"
+  description: "ATM 0DTE (delta=0.50): same conviction sweep, for comparison with deep ITM"
+
+signals:
+  dir: "../lob-model-trainer/outputs/experiments/nvda_tlob_128feat_regression_h10/signals/test"
+
+backtest:
+  initial_capital: 100000
+  position_size: 0.1
+  allow_short: false
+  exchange: "XNAS"
+
+strategy:
+  type: "regression"
+  max_spread_bps: 1.05
+  primary_horizon_idx: 0
+
+holding:
+  type: "horizon_aligned"
+  hold_events: 10
+
+zero_dte:
+  enabled: true
+  delta: 0.50
+  commission_per_contract: 0.70
+
+sweep:
+  min_return_bps: [0.7, 1.0, 2.0, 3.0, 5.0, 8.0, 10.0]
+
+output:
+  dir: "outputs/backtests/e1_atm_comparison"
+  save_equity_curve: false

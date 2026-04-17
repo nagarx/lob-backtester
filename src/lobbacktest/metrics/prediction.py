@@ -49,7 +49,7 @@ class DirectionalAccuracy(Metric):
         - Requires "predictions" and "labels" in context
     """
 
-    def __init__(self, name: str = None, shifted: bool = False):
+    def __init__(self, *, name: str = None, shifted: bool = False):
         """
         Initialize DirectionalAccuracy metric.
 
@@ -143,7 +143,7 @@ class SignalRate(Metric):
         - Low signal rate = conservative model
     """
 
-    def __init__(self, name: str = None, shifted: bool = False):
+    def __init__(self, *, name: str = None, shifted: bool = False):
         """
         Initialize SignalRate metric.
 
@@ -207,7 +207,7 @@ class UpPrecision(Metric):
         Standard precision metric focused on Up class
     """
 
-    def __init__(self, name: str = None, shifted: bool = False):
+    def __init__(self, *, name: str = None, shifted: bool = False):
         """
         Initialize UpPrecision metric.
 
@@ -278,7 +278,7 @@ class DownPrecision(Metric):
         Standard precision metric focused on Down class
     """
 
-    def __init__(self, name: str = None, shifted: bool = False):
+    def __init__(self, *, name: str = None, shifted: bool = False):
         """
         Initialize DownPrecision metric.
 
@@ -350,7 +350,7 @@ class ConfusionMetrics(Metric):
         Standard multi-class classification metrics
     """
 
-    def __init__(self, name: str = None, shifted: bool = False):
+    def __init__(self, *, name: str = None, shifted: bool = False):
         """
         Initialize ConfusionMetrics.
 

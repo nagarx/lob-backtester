@@ -14,17 +14,32 @@ Expected directory structure:
     │   └── {date}_normalization.json
     ├── val/
     └── test/
+
+Normalization boundary contract:
+    The Rust exporter writes raw (un-normalized) features by default.
+    The {date}_normalization.json contains identity placeholders (means=0, stds=1).
+    The trainer normalizes a COPY of the data for model input.
+    The backtester reads the ORIGINAL raw .npy and extracts prices directly.
+    Therefore the backtester does NOT need the trainer's normalization stats.
 """
 
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Tuple, Union
 import json
+import logging
 
 import numpy as np
 
 from lobbacktest.data.prices import NormalizationParams, PriceExtractor
 from lobbacktest.engine.vectorized import BacktestData
+
+from hft_contracts.validation import (
+    ContractError,
+    validate_export_contract,
+)
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -145,12 +160,18 @@ class DataLoader:
         """
         Load all data for the split.
 
+        Validates export contract on the first day's metadata, then loads
+        all days with shape assertions.
+
         Returns:
             LoadedData with concatenated sequences, labels, and prices
+
+        Raises:
+            FileNotFoundError: If required files are missing.
+            ContractError: If export metadata fails validation.
         """
         split_dir = self.data_dir / self.split
 
-        # Find all sequence files
         seq_files = sorted(split_dir.glob("*_sequences.npy"))
         if not seq_files:
             raise FileNotFoundError(f"No sequence files found in {split_dir}")
@@ -160,36 +181,54 @@ class DataLoader:
         all_prices = []
         day_boundaries = []
         days = []
+        contract_validated = False
 
         current_idx = 0
 
         for seq_file in seq_files:
-            # Parse date from filename
             date = seq_file.stem.replace("_sequences", "")
 
-            # Load sequence file
             sequences = np.load(seq_file)
 
-            # Load labels
             label_file = split_dir / f"{date}_labels.npy"
-            if label_file.exists():
-                labels = np.load(label_file)
-            else:
-                # Create dummy labels if not available
-                labels = np.zeros(len(sequences), dtype=np.int8)
+            if not label_file.exists():
+                raise FileNotFoundError(
+                    f"Missing labels for {date}: {label_file}. "
+                    "Backtester requires labels for performance evaluation."
+                )
+            labels = np.load(label_file)
 
-            # Load normalization params
+            if sequences.shape[0] != labels.shape[0]:
+                raise ContractError(
+                    f"Sequence-label alignment violation for {date}: "
+                    f"sequences.shape[0]={sequences.shape[0]} != "
+                    f"labels.shape[0]={labels.shape[0]}"
+                )
+
+            meta_file = split_dir / f"{date}_metadata.json"
+            metadata: Dict = {}
+            if meta_file.exists():
+                with open(meta_file) as f:
+                    metadata = json.load(f)
+
+            if not contract_validated and metadata.get("schema_version"):
+                warnings = validate_export_contract(
+                    metadata, strict_completeness=False
+                )
+                for w in warnings:
+                    logger.warning("Contract warning (%s): %s", date, w)
+                contract_validated = True
+
             norm_file = split_dir / f"{date}_normalization.json"
-            if norm_file.exists():
-                norm_params = NormalizationParams.from_json(norm_file)
-            else:
-                norm_params = None
+            norm_params = (
+                NormalizationParams.from_json(norm_file)
+                if norm_file.exists()
+                else None
+            )
 
-            # Extract prices
             extractor = PriceExtractor(norm_params)
             prices = extractor.extract_mid_prices(sequences, denormalize=True)
 
-            # Track day boundaries
             start_idx = current_idx
             end_idx = current_idx + len(sequences)
             day_boundaries.append((start_idx, end_idx))
@@ -200,7 +239,6 @@ class DataLoader:
             all_labels.append(labels)
             all_prices.append(prices)
 
-        # Concatenate
         return LoadedData(
             sequences=np.concatenate(all_sequences, axis=0),
             labels=np.concatenate(all_labels, axis=0),
@@ -218,31 +256,53 @@ class DataLoader:
 
         Returns:
             DayData for the specified date
+
+        Raises:
+            FileNotFoundError: If sequences or labels are missing.
+            ContractError: If export metadata fails validation.
         """
         split_dir = self.data_dir / self.split
 
-        # Load sequences
         seq_file = split_dir / f"{date}_sequences.npy"
         if not seq_file.exists():
             raise FileNotFoundError(f"Sequence file not found: {seq_file}")
 
         sequences = np.load(seq_file)
 
-        # Load labels
         label_file = split_dir / f"{date}_labels.npy"
-        labels = np.load(label_file) if label_file.exists() else np.zeros(len(sequences))
+        if not label_file.exists():
+            raise FileNotFoundError(
+                f"Missing labels for {date}: {label_file}. "
+                "Backtester requires labels for performance evaluation."
+            )
+        labels = np.load(label_file)
 
-        # Load metadata
+        if sequences.shape[0] != labels.shape[0]:
+            raise ContractError(
+                f"Sequence-label alignment violation for {date}: "
+                f"sequences.shape[0]={sequences.shape[0]} != "
+                f"labels.shape[0]={labels.shape[0]}"
+            )
+
         meta_file = split_dir / f"{date}_metadata.json"
+        metadata: Dict = {}
         if meta_file.exists():
             with open(meta_file) as f:
                 metadata = json.load(f)
-        else:
-            metadata = {}
 
-        # Load normalization and extract prices
+        if metadata.get("schema_version"):
+            warnings = validate_export_contract(
+                metadata, strict_completeness=False
+            )
+            for w in warnings:
+                logger.warning("Contract warning (%s): %s", date, w)
+
         norm_file = split_dir / f"{date}_normalization.json"
-        norm_params = NormalizationParams.from_json(norm_file) if norm_file.exists() else None
+        norm_params = (
+            NormalizationParams.from_json(norm_file)
+            if norm_file.exists()
+            else None
+        )
 
         extractor = PriceExtractor(norm_params)
         prices = extractor.extract_mid_prices(sequences, denormalize=True)

@@ -30,7 +30,7 @@ Standalone backtesting library for evaluating direction prediction models traine
 
 ### Design Principles
 
-1. **Vectorized Computation**: All computation uses numpy, no Python loops in hot paths
+1. **Per-Sample Engine**: Position tracking via Python loop with numpy-based metric computation. (Note: module name `vectorized.py` is historical; the main engine loop is a Python `for i in range(n):` loop, not vectorized.)
 2. **Metric ABC Pattern**: Composable, extensible metrics (inspired by `hftbacktest`)
 3. **Fluent API**: Chainable operations for intuitive usage
 4. **Comprehensive Testing**: Every module tested to expose implementation issues
@@ -54,7 +54,8 @@ src/lobbacktest/
 ├── __init__.py          # Public API exports
 ├── version.py           # Version information
 ├── types.py             # Core types: Trade, Position, BacktestResult
-├── config.py            # Configuration: BacktestConfig, CostConfig
+├── config.py            # Configuration: BacktestConfig, CostConfig, ZeroDteConfig, OpraCalibratedCosts
+├── registry.py          # Strategy registry
 │
 ├── data/                # Data loading and preprocessing
 │   ├── __init__.py
@@ -62,13 +63,19 @@ src/lobbacktest/
 │   └── prices.py        # PriceExtractor: Denormalize prices
 │
 ├── strategies/          # Trading strategy implementations
-│   ├── __init__.py
+│   ├── __init__.py      # Exports all strategies
 │   ├── base.py          # Strategy ABC, Signal enum, SignalOutput
-│   └── direction.py     # DirectionStrategy, ThresholdStrategy
+│   ├── direction.py     # DirectionStrategy, ThresholdStrategy
+│   ├── readability.py   # ReadabilityStrategy (HMHP agreement + confidence gate)
+│   ├── regression.py    # RegressionStrategy (magnitude gate for continuous predictions)
+│   ├── hybrid.py        # ReadabilityHybridStrategy (classification direction + regression magnitude)
+│   ├── holding.py       # HoldingPolicy, HorizonAlignedPolicy, HoldingState
+│   └── twap.py          # TWAPStrategy (time-weighted execution)
 │
 ├── engine/              # Backtest execution
 │   ├── __init__.py
-│   └── vectorized.py    # VectorizedEngine, Backtester, BacktestData
+│   ├── vectorized.py    # VectorizedEngine, Backtester, BacktestData
+│   └── zero_dte.py      # ZeroDtePnLTransformer, ZeroDteResult (0DTE options P&L)
 │
 ├── metrics/             # Performance metrics
 │   ├── __init__.py
@@ -76,11 +83,18 @@ src/lobbacktest/
 │   ├── returns.py       # TotalReturn, AnnualReturn
 │   ├── risk.py          # SharpeRatio, SortinoRatio, MaxDrawdown, CalmarRatio
 │   ├── trading.py       # WinRate, ProfitFactor, Expectancy, etc.
-│   └── prediction.py    # DirectionalAccuracy, SignalRate, Precision
+│   ├── prediction.py    # DirectionalAccuracy, SignalRate, UpPrecision, DownPrecision
+│   └── regression_prediction.py  # PredictionMSE, PredictionCorrelation, PredictionIC
 │
 ├── stats/               # Statistics and aggregation
 │   ├── __init__.py
 │   └── stats.py         # BacktestStats fluent API
+│
+├── scripts/             # Runnable scripts
+│   ├── backtest_deeplob.py         # DeepLOB backtest runner
+│   ├── param_sweep.py              # Parameter sweep (multi-config)
+│   ├── run_readability_backtest.py  # Readability strategy backtest
+│   └── run_regression_backtest.py   # Regression strategy backtest
 │
 └── reports/             # Reporting and visualization
     ├── __init__.py
@@ -232,13 +246,13 @@ class CostConfig:
     spread_bps: float = 1.0          # Bid-ask spread per trade
     slippage_bps: float = 0.5        # Market impact
     commission_per_trade: float = 0.0 # Fixed commission (USD)
+    exchange: str = ""                # Exchange name for presets
+    maker_rebate_bps: float = 0.0
+    taker_fee_bps: float = 0.0
 
-    @property
-    def total_bps(self) -> float:
-        """Total variable cost."""
-
-    def compute_cost(self, notional: float) -> float:
-        """Total cost for a trade."""
+    @classmethod
+    def for_exchange(cls, exchange: str) -> "CostConfig":
+        """Load preset costs for an exchange (XNAS, ARCX)."""
 ```
 
 ### BacktestConfig
@@ -248,26 +262,37 @@ class CostConfig:
 class BacktestConfig:
     """Main backtest configuration."""
     initial_capital: float = 100_000.0
-    position_size: float = 0.1        # Fraction of capital per trade
-    max_position: float = 1.0         # Maximum position fraction
+    position_size: float = 0.1
+    max_position: float = 1.0
     costs: CostConfig = field(default_factory=CostConfig)
+    zero_dte: ZeroDteConfig = field(default_factory=ZeroDteConfig)
     allow_short: bool = True
     fill_price: Literal["close", "midpoint"] = "close"
     stop_loss_pct: Optional[float] = None
     take_profit_pct: Optional[float] = None
     trading_days_per_year: float = 252.0
     periods_per_day: float = 1000.0
+    min_confidence: float = 0.0       # For readability-gated strategies
+    min_agreement: float = 0.0        # For readability-gated strategies
+```
 
-    @property
-    def annualization_factor(self) -> float:
-        """sqrt(trading_days_per_year * periods_per_day)"""
+### ZeroDteConfig and OpraCalibratedCosts
 
-    def to_dict(self) -> Dict
-    @classmethod
-    def from_dict(cls, d: Dict) -> "BacktestConfig"
-    @classmethod
-    def load_yaml(cls, path: str) -> "BacktestConfig"
-    def save_yaml(self, path: str) -> None
+```python
+@dataclass
+class OpraCalibratedCosts:
+    """IBKR-validated 0DTE option cost model."""
+    commission_per_contract: float = 0.70   # IBKR median (318 fills)
+    implied_vol: float = 0.40
+    entry_minutes_before_close: float = 120.0
+
+@dataclass
+class ZeroDteConfig:
+    """0DTE option P&L transformation configuration."""
+    enabled: bool = False
+    delta: float = 0.50                     # Option delta (0.50 = ATM)
+    opra_costs: OpraCalibratedCosts = field(default_factory=OpraCalibratedCosts)
+    contracts_per_trade: int = 1
 ```
 
 ### Validation Rules
@@ -341,6 +366,59 @@ strategy = ThresholdStrategy(
 )
 ```
 
+### ReadabilityStrategy
+
+Trades only when the HMHP readability gate passes (agreement + confidence + spread):
+
+```python
+strategy = ReadabilityStrategy(
+    predictions=predictions,        # 0=Down, 1=Stable, 2=Up
+    agreement_ratio=agreement,      # HMHP cross-horizon agreement [N]
+    confirmation_score=confidence,  # HMHP decoder confidence [N]
+    spreads=spreads,                # Bid-ask spread bps [N]
+    prices=prices,
+    config=ReadabilityConfig(min_agreement=1.0, min_confidence=0.65, max_spread_bps=1.05),
+    holding_policy=HorizonAlignedPolicy(hold_events=10),
+)
+```
+
+### RegressionStrategy
+
+Entry gate based on magnitude of continuous return predictions:
+
+```python
+strategy = RegressionStrategy(
+    predicted_returns=predicted_returns,  # Continuous bps [N]
+    spreads=spreads,
+    prices=prices,
+    config=RegressionStrategyConfig(min_return_bps=5.0, max_spread_bps=1.05),
+)
+```
+
+### ReadabilityHybridStrategy
+
+Combines classification direction (HMHP) with regression magnitude (Ridge):
+
+```python
+strategy = ReadabilityHybridStrategy(
+    predictions=predictions,              # HMHP direction (0/1/2)
+    agreement_ratio=agreement,            # HMHP readability gate
+    confirmation_score=confidence,        # HMHP confidence gate
+    predicted_returns=predicted_returns,  # Ridge magnitude gate
+    spreads=spreads, prices=prices,
+    config=ReadabilityHybridConfig(min_agreement=1.0, min_confidence=0.65, min_return_bps=5.0),
+    holding_policy=HorizonAlignedPolicy(hold_events=60),
+)
+```
+
+### HoldingPolicy
+
+Controls exit timing for position-holding strategies:
+
+- `HorizonAlignedPolicy(hold_events=N)`: Hold for exactly N events after entry
+- `HoldingState`: Tracks events held, unrealized P&L, entry price
+- `create_holding_policy(config_dict)`: Factory from YAML config
+
 ---
 
 ## 7. Engine
@@ -350,10 +428,33 @@ strategy = ThresholdStrategy(
 ```python
 @dataclass
 class BacktestData:
-    """Input data for backtest."""
-    prices: np.ndarray                     # Mid-prices (shape: N)
-    labels: Optional[np.ndarray] = None    # True labels
+    """Input data for backtest. Supports both classification and regression signals."""
+    prices: np.ndarray                              # Mid-prices [N]
+    labels: Optional[np.ndarray] = None             # True class labels
     timestamps_ns: Optional[np.ndarray] = None
+    predictions: Optional[np.ndarray] = None        # Model class predictions [N]
+    spreads: Optional[np.ndarray] = None            # Bid-ask spread bps [N]
+    agreement_ratio: Optional[np.ndarray] = None    # HMHP agreement [N]
+    confirmation_score: Optional[np.ndarray] = None # HMHP confidence [N]
+    predicted_returns: Optional[np.ndarray] = None  # Regression predictions bps [N]
+    regression_labels: Optional[np.ndarray] = None  # True regression labels bps [N]
+
+    @classmethod
+    def from_signal_dir(cls, signal_dir: str) -> "BacktestData":
+        """Load all .npy signal files from a directory."""
+```
+
+### ZeroDtePnLTransformer
+
+Transforms equity backtest results into 0DTE option P&L using IBKR-calibrated costs:
+
+```python
+transformer = ZeroDtePnLTransformer(ZeroDteConfig(
+    enabled=True, delta=0.50, contracts_per_trade=1,
+    opra_costs=OpraCalibratedCosts(commission_per_contract=0.70, implied_vol=0.40),
+))
+option_result = transformer.transform(backtest_result)
+# option_result.option_total_return, option_result.option_win_rate, etc.
 ```
 
 ### VectorizedEngine
@@ -513,6 +614,15 @@ loader = DataLoader(
 )
 data = loader.load()  # Returns LoadedData
 ```
+
+### Contract Validation at Load Time
+
+As of v0.1.0, `DataLoader.load()` enforces the pipeline contract:
+
+1. **Labels mandatory**: Raises `FileNotFoundError` if `{date}_labels.npy` is missing (no silent zero-substitution)
+2. **Shape alignment**: Raises `ContractError` if `sequences.shape[0] != labels.shape[0]`
+3. **Contract validation** (first day only): Calls `validate_export_contract()` which checks schema version, feature count, normalization state, and provenance
+4. **Normalization boundary**: The backtester operates on raw (un-normalized) features. The Rust exporter's identity normalization JSON is correct for backtesting. The trainer's normalization stats are NOT used by the backtester.
 
 ### LoadedData
 
@@ -724,5 +834,11 @@ from lobbacktest.reports import plot_equity_curve
 
 ---
 
-*Last updated: December 28, 2025 (v1.0.0)*
+*Last updated: March 17, 2026 (v0.2.0 — Phase 1-3b redesign: bug fixes, LabelMapping, BacktestContext, SignalManifest, ExperimentRunner)*
+
+> **Note**: `prices.py` imports feature indices from `hft-contracts`.
+> `NormalizationParams.from_json()` validates the `normalization_applied` boundary
+> contract. `DataLoader.load()` enforces `validate_export_contract()` at load time,
+> requires labels for all days (no silent zero-substitution), and validates
+> sequence-label shape alignment via `ContractError`.
 

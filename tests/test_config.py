@@ -204,3 +204,61 @@ class TestBacktestConfig:
             assert loaded.initial_capital == 200000
             assert loaded.position_size == 0.3
 
+
+class TestExchangePresetsSingleSource:
+    """Phase 6 6A.6 regression guards — `_EXCHANGE_PRESETS` is the SINGLE
+    SOURCE of exchange-calibrated cost data. Prior state duplicated the
+    dict in a dead `CostConfig.EXCHANGE_PRESETS` class-var AND an inline
+    literal inside `for_exchange()` — drift hazard (any preset change
+    required updating BOTH places to stay consistent).
+    """
+
+    def test_no_dead_class_attribute(self):
+        """Dead `EXCHANGE_PRESETS` class-var must not be reintroduced."""
+        assert not hasattr(CostConfig, "EXCHANGE_PRESETS"), (
+            "CostConfig.EXCHANGE_PRESETS was removed in Phase 6 6A.6 "
+            "(duplicated module-level _EXCHANGE_PRESETS). Do not reintroduce."
+        )
+
+    def test_for_exchange_reads_module_level_source(self):
+        """for_exchange() reads _EXCHANGE_PRESETS (single source). A
+        runtime patch to the module-level dict must flow through."""
+        import lobbacktest.config as _cfg_mod
+        original = _cfg_mod._EXCHANGE_PRESETS["XNAS"].copy()
+        try:
+            # Patch the source — for_exchange() must pick it up.
+            _cfg_mod._EXCHANGE_PRESETS["XNAS"] = {
+                "spread_bps": 99.0,
+                "slippage_bps": 99.0,
+                "taker_fee_bps": 99.0,
+                "maker_rebate_bps": 0.0,
+            }
+            cost = CostConfig.for_exchange("XNAS")
+            assert cost.spread_bps == 99.0, (
+                "for_exchange() must read module-level _EXCHANGE_PRESETS. "
+                "If this test fails, a duplicate preset source has been "
+                "reintroduced somewhere."
+            )
+        finally:
+            _cfg_mod._EXCHANGE_PRESETS["XNAS"] = original
+
+    def test_for_exchange_unknown_raises_valueerror(self):
+        with pytest.raises(ValueError, match="Unknown exchange"):
+            CostConfig.for_exchange("BATS")
+
+    def test_xnas_vwes_calibration_preserved(self):
+        """Baseline regression — 233-day NVDA VWES calibration values
+        (mbo-statistical-profiler output) preserved post-refactor."""
+        xnas = CostConfig.for_exchange("XNAS")
+        assert xnas.spread_bps == 1.0
+        assert xnas.slippage_bps == 1.97   # XNAS VWES
+        assert xnas.taker_fee_bps == 0.30
+        assert xnas.maker_rebate_bps == -0.20
+
+    def test_arcx_vwes_calibration_preserved(self):
+        arcx = CostConfig.for_exchange("ARCX")
+        assert arcx.spread_bps == 1.0
+        assert arcx.slippage_bps == 1.10   # ARCX VWES
+        assert arcx.taker_fee_bps == 0.25
+        assert arcx.maker_rebate_bps == -0.15
+

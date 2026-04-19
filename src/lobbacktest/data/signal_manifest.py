@@ -32,7 +32,10 @@ from __future__ import annotations
 import warnings as _warnings
 
 _CANONICAL_MODULE = "hft_contracts.signal_manifest"
-_REMOVAL_VERSION = "0.4.0"
+# Calendar-driven shim deadline (Phase 7 post-validation, 2026-04-19).
+# See hft-ops/src/hft_ops/provenance/lineage.py for rationale — 6 months
+# from Phase 6 6B.5.
+_REMOVAL_DATE = "2026-10-31"
 _PUBLIC_NAMES = frozenset({
     "_CONTENT_HASH_RE",
     "ALIGNED_FILES",
@@ -57,7 +60,7 @@ def __getattr__(name: str):
                 f"`lobbacktest.data.signal_manifest.{name}` is a Phase 6 "
                 f"6B.5 re-export shim. Migrate to "
                 f"`from {_CANONICAL_MODULE} import {name}` before the "
-                f"{_REMOVAL_VERSION} removal. "
+                f"{_REMOVAL_DATE} removal deadline. "
                 f"(This warning fires once per symbol per process.)",
                 DeprecationWarning,
                 stacklevel=2,

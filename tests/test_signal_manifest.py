@@ -363,8 +363,30 @@ class TestFeatureSetRefContentHashRegex:
     def test_regex_is_module_level(self):
         """Phase 6 6A.9 hardening: regex must be compiled ONCE at import
         (not re-compiled per call). Prevents prior inline `_re.compile(...)`
-        pattern inside `_from_metadata` from being reintroduced."""
-        from lobbacktest.data.signal_manifest import _CONTENT_HASH_RE
+        pattern inside `_from_metadata` from being reintroduced.
+
+        REV 2 pre-push (2026-04-20): canonical public name is
+        `CONTENT_HASH_RE`; legacy `_CONTENT_HASH_RE` remains accessible
+        through the backtester shim + hft-contracts `__getattr__` (chained
+        deprecation warnings, removal 2026-10-31).
+        """
         import re
-        assert isinstance(_CONTENT_HASH_RE, re.Pattern)
-        assert _CONTENT_HASH_RE.pattern == r"^[a-f0-9]{64}$"
+        import warnings
+
+        # REV 2 public name (added to _PUBLIC_NAMES 2026-04-20 follow-up).
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            from lobbacktest.data.signal_manifest import CONTENT_HASH_RE
+        assert isinstance(CONTENT_HASH_RE, re.Pattern)
+        assert CONTENT_HASH_RE.pattern == r"^[a-f0-9]{64}$"
+
+        # Legacy name still resolves via backtester shim __getattr__ →
+        # hft-contracts signal_manifest __getattr__ → same compiled pattern.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            from lobbacktest.data.signal_manifest import _CONTENT_HASH_RE
+        assert _CONTENT_HASH_RE is CONTENT_HASH_RE, (
+            "REV 2 regression: backtester shim's legacy `_CONTENT_HASH_RE` "
+            "must resolve to the same compiled pattern as the public "
+            "`CONTENT_HASH_RE` (hft-contracts alias identity invariant)."
+        )

@@ -5,11 +5,12 @@ module exists solely for backward compatibility with pre-6B.5 imports:
 
     from lobbacktest.data.signal_manifest import SignalManifest    # still works
     from lobbacktest.data.signal_manifest import ContractError     # still works
-    from lobbacktest.data.signal_manifest import _CONTENT_HASH_RE  # still works
+    from lobbacktest.data.signal_manifest import _CONTENT_HASH_RE  # still works (emits chained DeprecationWarning)
+    from lobbacktest.data.signal_manifest import CONTENT_HASH_RE   # REV 2 public name (added 2026-04-20)
 
 New code should import from hft_contracts:
 
-    from hft_contracts.signal_manifest import SignalManifest, ContractError
+    from hft_contracts.signal_manifest import SignalManifest, ContractError, CONTENT_HASH_RE
 
 Why the move? SignalManifest is a cross-module contract surface: the
 trainer's SignalExporter WRITES signal_metadata.json, the backtester
@@ -37,6 +38,12 @@ _CANONICAL_MODULE = "hft_contracts.signal_manifest"
 # from Phase 6 6B.5.
 _REMOVAL_DATE = "2026-10-31"
 _PUBLIC_NAMES = frozenset({
+    # REV 2 public-API hygiene (2026-04-20): `CONTENT_HASH_RE` is the
+    # canonical public name; `_CONTENT_HASH_RE` is a hft-contracts-side
+    # deprecation shim (emits its own DeprecationWarning via PEP 562
+    # module-level __getattr__, removal 2026-10-31). Both retained here
+    # so pre-REV-2 and post-REV-2 importers via the backtester shim work.
+    "CONTENT_HASH_RE",
     "_CONTENT_HASH_RE",
     "ALIGNED_FILES",
     "CLASSIFICATION_OPTIONAL",

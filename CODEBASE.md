@@ -10,13 +10,14 @@
 - **Phase 6 6B.5** (`77f2068`) — `SignalManifest` canonical home co-moved to `hft_contracts.signal_manifest`; this repo's `data/signal_manifest.py` is a thin re-export shim preserving pre-6B.5 imports.
 - **Phase 6 final hygiene** (`d642dd1`) — shim lazy `__getattr__` emits `DeprecationWarning` once per symbol per process.
 - **Phase 7 post-validation I** (`c28fc53`, `09d4665`) — calendar-driven shim deadline `2026-10-31` replaces prior "version 0.4.0" version-milestone language (hft-ops has no fixed release cadence; calendar gives a concrete migration window).
+- **REV 2 hft-contracts public-push follow-up** (`81eb6e9`, 2026-04-20) — backtester shim's `_PUBLIC_NAMES` frozenset extended with `CONTENT_HASH_RE` (REV 2 public name) so `from lobbacktest.data.signal_manifest import CONTENT_HASH_RE` resolves through the Phase 6 6B.5 re-export layer. Legacy `_CONTENT_HASH_RE` (now a `__getattr__`-based DeprecationWarning shim in hft-contracts, removal 2026-10-31) still accessible; `test_regex_is_module_level` extended to verify both names map to the same compiled pattern.
 
 ## Architecture
 
 - **Engine**: Per-sample loop in `engine/vectorized.py` (name is historical; actual algorithm is NOT vectorized). `engine/zero_dte.py` layers IBKR-calibrated 0DTE options P&L transformation on top of the equity backtest.
 - **Strategy Pattern**: `Strategy` ABC in `strategies/base.py` + 7 concretes (direction, readability, regression, hybrid, holding policies, twap SKIP). `HoldingPolicy` ABC is composable via `CompositePolicy(mode="any"|"all")`.
 - **Metrics ABC**: `metrics/base.py::Metric` + 5 groupings across returns/risk/trading/prediction/regression_prediction.
-- **Contract plane via hft_contracts**: `SignalManifest` canonical home at `hft_contracts.signal_manifest` (Phase 6 6B.5); `_CONTENT_HASH_RE` regex imported from same SSoT; label encoding defers to `hft_contracts.labels.LabelContract` for cross-module agreement.
+- **Contract plane via hft_contracts**: `SignalManifest` canonical home at `hft_contracts.signal_manifest` (Phase 6 6B.5); `CONTENT_HASH_RE` regex imported from same SSoT (REV 2 public rename from `_CONTENT_HASH_RE`, 2026-04-20 — legacy name is a DeprecationWarning shim through 2026-10-31); `ContractError` imported from `hft_contracts.validation` (REV 2 F1 consolidation — was two independent classes); `atomic_write_json` imported from `hft_contracts.atomic_io` (REV 2 public rename from `_atomic_io`); label encoding defers to `hft_contracts.labels.LabelContract` for cross-module agreement.
 - **IBKR-calibrated 0DTE cost model**: constants calibrated from 316 real NVDA option fills; breakevens 4.9 / 3.8 / 1.4 bps for ATM Call / ATM Put / Deep ITM. Provenance in `engine/zero_dte.py` docstring + `IBKR-transactions-trades/COST_AUDIT_2026_03.md`.
 - **Typed + dict hybrid context**: `BacktestContext` is a typed dataclass that also implements `__getitem__` / `__contains__` / `get` / `update` for backward compat with metric consumers written for dict-protocol. Migration path to pure typed access is gradual.
 

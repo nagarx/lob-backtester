@@ -200,7 +200,17 @@ class TestValidationWarnings:
         )
 
     def test_clean_data_no_warnings(self, tmp_path: Path):
-        """Fully valid directory with all files → empty warnings list."""
+        """Fully valid directory with all files → only optional-file + Phase II legacy notices.
+
+        Phase II (2026-04-20): SignalManifest.validate() emits a legacy-manifest
+        DeprecationWarning when the signal directory was produced by a pre-Phase-II
+        trainer (no CompatibilityContract in signal_metadata.json). This is a
+        non-critical notice — the test fixture here intentionally constructs a
+        pre-Phase-II manifest (no ``compatibility`` block), so the warning is
+        expected. Filtered out of the "critical" set alongside the "missing
+        optional file" warnings. Once the trainer exporter produces the new block
+        (Phase II Step II.4), this fixture can be upgraded and the filter tightened.
+        """
         d = _create_signal_dir(
             tmp_path,
             include_predictions=True,
@@ -212,8 +222,13 @@ class TestValidationWarnings:
         )
         manifest = SignalManifest.from_signal_dir(d)
         warnings = manifest.validate(d)
-        # Only warnings should be about non-present optional files
-        critical_warnings = [w for w in warnings if "missing" not in w.lower()]
+        # Only warnings should be: (a) missing optional files, (b) Phase II legacy-manifest notice.
+        critical_warnings = [
+            w for w in warnings
+            if "missing" not in w.lower()
+            and "compatibilitycontract" not in w.lower()
+            and "legacy signal manifest" not in w.lower()
+        ]
         assert len(critical_warnings) == 0, (
             f"Expected no critical warnings, got: {critical_warnings}"
         )

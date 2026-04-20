@@ -17,7 +17,7 @@ Design Philosophy:
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -83,6 +83,7 @@ class BacktestData:
         signal_dir: str,
         *,
         validate: bool = True,
+        expected_fields: Optional[Dict[str, Any]] = None,
     ) -> "BacktestData":
         """Load BacktestData from a directory of exported signal arrays.
 
@@ -94,27 +95,65 @@ class BacktestData:
         - All arrays have aligned first dimension (ContractError if mismatched)
         - No NaN/Inf in required arrays (ContractError if found)
         - Value ranges are sensible (warnings for anomalies)
+        - (Phase II, 2026-04-20) CompatibilityContract producer fingerprint
+          self-check (tamper detection)
+        - (Phase II hardening SB-1, 2026-04-20) If ``expected_fields`` is
+          supplied, each field must match ``manifest.compatibility.<field>``.
+          Partial-assertion API: consumer asserts the fields it actually knows
+          about (e.g., ``primary_horizon_idx``) and defers everything else to
+          the trainer. Typo'd keys raise ``ValueError``.
 
         Args:
             signal_dir: Path to directory containing .npy signal arrays.
             validate: If True, validate signal contract at load time.
                 Set to False for legacy code or manual testing.
+            expected_fields: Phase II hardening (2026-04-20 SB-1) — consumer-side
+                partial CompatibilityContract assertion. Dict mapping
+                ``CompatibilityContract`` field name to expected value. Only
+                applied when ``validate=True``. Closes the version-skew
+                detection gap left by Phase II (v2.21): producer-side
+                fingerprint check was active but consumer-side was never wired
+                (backtester never constructed an expected_contract). A partial
+                assertion (just ``primary_horizon_idx``) is architecturally
+                cleaner than a full 11-field contract the backtester doesn't
+                fully know.
 
         Returns:
             BacktestData populated with all available arrays.
 
         Raises:
             ContractError: If validation=True and critical contract
-                violation detected (missing files, shape mismatch, etc.).
+                violation detected (missing files, shape mismatch, expected_fields
+                mismatch, etc.).
+            ValueError: If expected_fields contains a key that is not a
+                CompatibilityContract field name (typo detection).
         """
         d = Path(signal_dir)
 
-        # Validate signal contract before loading
+        # SB-E (Phase II hardening, 2026-04-21): contradictory-args guard.
+        # Passing ``expected_fields`` + ``validate=False`` is always a caller
+        # bug — the assertion cannot run because ``SignalManifest.validate()``
+        # is never invoked. Previous behavior silently dropped the assertion,
+        # giving the caller a false sense of version-skew coverage. Per
+        # hft-rules §5 fail-fast policy, raise.
+        if expected_fields is not None and not validate:
+            raise ValueError(
+                "BacktestData.from_signal_dir: expected_fields requires "
+                "validate=True. Passing validate=False disables SignalManifest."
+                "validate(), so expected_fields cannot be asserted. "
+                "Either supply validate=True (recommended) or drop expected_fields."
+            )
+
+        # Validate signal contract before loading. Retain the manifest beyond
+        # validation so the calibration-precedence rule (Phase II D10 fix,
+        # 2026-04-20) can use ``manifest.calibration_method`` as the authoritative
+        # gate instead of file-existence.
+        manifest = None
         if validate:
             from lobbacktest.data.signal_manifest import SignalManifest
 
             manifest = SignalManifest.from_signal_dir(d)
-            warnings = manifest.validate(d)
+            warnings = manifest.validate(d, expected_fields=expected_fields)
             for w in warnings:
                 print(f"  ⚠️  Signal validation: {w}")
 
@@ -124,13 +163,40 @@ class BacktestData:
         spreads = np.load(d / "spreads.npy") if (d / "spreads.npy").exists() else None
         agreement = np.load(d / "agreement_ratio.npy") if (d / "agreement_ratio.npy").exists() else None
         confirmation = np.load(d / "confirmation_score.npy") if (d / "confirmation_score.npy").exists() else None
-        # Prefer calibrated predictions if available (E6+)
-        if (d / "calibrated_returns.npy").exists():
+
+        # Phase II D10 fix (2026-04-20): calibration precedence is MANIFEST-DRIVEN, not
+        # file-existence-driven. The OLD pattern silently preferred calibrated_returns.npy
+        # whenever the file existed — a stale calibration file from a previous export
+        # would silently override the fresh predicted_returns.npy. The manifest's
+        # calibration_method field is now the authoritative gate:
+        #   - manifest.calibration_method is None      → use predicted_returns.npy
+        #   - manifest.calibration_method is not None  → use calibrated_returns.npy
+        # SignalManifest.validate() already raises ContractError on orphan files
+        # (file exists but manifest claims no calibration, or vice versa), so by the
+        # time we reach this point the file/claim alignment is guaranteed.
+        # Legacy path (validate=False OR pre-Phase-II manifest without
+        # calibration_method): fall back to file-existence semantics for
+        # back-compat with R1-R8 ledger signal directories.
+        manifest_says_calibrated = (
+            manifest is not None and manifest.calibration_method is not None
+        )
+        if manifest_says_calibrated and (d / "calibrated_returns.npy").exists():
             predicted_returns = np.load(d / "calibrated_returns.npy")
-        elif (d / "predicted_returns.npy").exists():
-            predicted_returns = np.load(d / "predicted_returns.npy")
+        elif manifest is not None and manifest.calibration_method is None:
+            # Manifest EXPLICITLY says no calibration — use predicted regardless
+            # of whether a stale calibrated file happens to exist.
+            if (d / "predicted_returns.npy").exists():
+                predicted_returns = np.load(d / "predicted_returns.npy")
+            else:
+                predicted_returns = None
         else:
-            predicted_returns = None
+            # Legacy / no-manifest path (pre-Phase-II signal directories + validate=False).
+            if (d / "calibrated_returns.npy").exists():
+                predicted_returns = np.load(d / "calibrated_returns.npy")
+            elif (d / "predicted_returns.npy").exists():
+                predicted_returns = np.load(d / "predicted_returns.npy")
+            else:
+                predicted_returns = None
         regression_labels = np.load(d / "regression_labels.npy") if (d / "regression_labels.npy").exists() else None
 
         return cls(

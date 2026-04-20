@@ -167,7 +167,19 @@ class ExperimentRunner:
         """
         # 1. Load signals
         signal_dir = Path(self.config.get("signals", {}).get("dir", ""))
-        data = BacktestData.from_signal_dir(str(signal_dir), validate=True)
+        # Phase II hardening SB-1 (2026-04-20): wire backtester consumer-side
+        # CompatibilityContract partial assertion. The backtester only knows
+        # `primary_horizon_idx` (from strategy config) — all other fields
+        # (feature_count, window_size, label_strategy, etc.) are trainer-side
+        # facts that the backtester trusts via the manifest's producer
+        # fingerprint self-check. Supplying expected_fields here catches the
+        # silent-version-skew case where a backtester configured for H10
+        # accidentally loads signals produced for H60 (different
+        # primary_horizon_idx, identical producer fingerprint).
+        expected_fields = self._expected_compatibility_fields()
+        data = BacktestData.from_signal_dir(
+            str(signal_dir), validate=True, expected_fields=expected_fields
+        )
 
         # Load signal metadata for provenance
         signal_metadata = self._load_signal_metadata(signal_dir)
@@ -279,6 +291,38 @@ class ExperimentRunner:
             "total_trades": result.total_trades,
             "final_equity": result.final_equity,
         }
+
+    def _expected_compatibility_fields(self) -> Optional[Dict[str, Any]]:
+        """Derive consumer-side partial CompatibilityContract assertion from config.
+
+        Phase II hardening SB-1 (2026-04-20): the backtester only knows a
+        narrow subset of the 11 shape-determining fields. Expose what it
+        knows (``primary_horizon_idx`` from the regression-strategy config)
+        for SignalManifest.validate() to cross-check against the manifest's
+        compatibility block. Returns None when no field is assertable
+        (e.g., classification-strategy path — primary_horizon_idx is
+        unused).
+
+        Cautious design: only assert fields that the backtester config
+        actively declares. Asserting on defaults (e.g., primary_horizon_idx=0
+        always) would surface false positives on legitimate multi-horizon
+        exports where the user just didn't override the default.
+        """
+        strategy_config = self.config.get("strategy", {})
+        strategy_type = strategy_config.get("type", "regression")
+        expected: Dict[str, Any] = {}
+
+        # RegressionStrategy knows primary_horizon_idx; only assert when the
+        # user explicitly set it in config (not accepting the class default).
+        if strategy_type == "regression" and "primary_horizon_idx" in strategy_config:
+            expected["primary_horizon_idx"] = strategy_config["primary_horizon_idx"]
+
+        # Future-extensibility: if other strategies gain shape-determining
+        # knowledge (e.g., hybrid strategy explicitly declares horizons), add
+        # field extraction here. Kept narrow for now to minimize false-positive
+        # skew detections on legitimate runs.
+
+        return expected if expected else None
 
     def _build_strategy(
         self, data: BacktestData, strategy_type: str, params: dict,

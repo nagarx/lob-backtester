@@ -23,6 +23,11 @@ jobs:
   test:
     name: pytest (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    # Timeout cap (Phase V.A.0 audit Agent-2 #3) — 20 min vs 360-min
+    # default runner cap, to prevent runaway cost from hung tests.
+    # Observed CI duration ~30s; 20 min is ~40× margin for install +
+    # network + cache miss slack.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:

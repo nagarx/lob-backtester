@@ -78,7 +78,11 @@ jobs:
         # Override pyproject's `addopts = -v --tb=short` to `-q --tb=short`
         # for compact CI output; the pyproject-declared verbose mode is for
         # local dev, not CI log volume.
-        run: pytest -q --tb=short -o addopts=""
+        # `--ignore=_deps` prevents pytest from collecting tests in the
+        # sibling-repo checkout under _deps/hft-contracts/. That repo runs
+        # its own CI workflow; this workflow only runs lob-backtester's
+        # own suite.
+        run: pytest -q --tb=short -o addopts="" --ignore=_deps
 
       - name: Lint (non-blocking)
         # ruff is in the dev extra; config lives in pyproject.toml

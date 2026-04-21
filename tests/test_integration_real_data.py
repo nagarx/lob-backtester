@@ -53,28 +53,23 @@ class LoadedTestData:
 def get_project_root() -> Path:
     """Get the HFT-pipeline-v2 root directory.
 
-    When lob-backtester is checked out standalone (e.g., on CI), this
-    directory doesn't exist — the whole ``TestBacktesterWithRealData``
+    Thin wrapper around ``hft_contracts._testing.require_monorepo_root`` —
+    the SSoT helper (Phase V.A.0) for cross-module monorepo-layout gates.
+    Previous implementation was a parallel in-file walk that duplicated
+    the SSoT logic (hft-rules §1 violation, flagged by V.A.0 audit).
+
+    When lob-backtester is checked out standalone (e.g., on CI), the
+    monorepo root is absent — the whole ``TestBacktesterWithRealData``
     class depends on paths that only resolve inside the monorepo layout.
     Per hft-rules §6 (tests document behavior; no tautological crashes),
-    we skip the enclosing test cleanly rather than raising a hard
-    ``RuntimeError`` that masquerades as a legitimate test failure.
+    we skip cleanly rather than raising a hard ``RuntimeError``.
 
-    Callers expect this fixture helper to be invoked LAZILY from inside
-    a pytest fixture (e.g., ``data_dir`` / ``model_dir`` below), so
-    ``pytest.skip()`` propagates correctly to the enclosing test.
+    Callers invoke this LAZILY from inside pytest fixtures so
+    ``pytest.skip()`` propagates to the enclosing test correctly.
     """
-    current = Path(__file__).resolve()
-    # Navigate up from lob-backtester/tests/test_integration_real_data.py
-    for parent in current.parents:
-        if parent.name == "HFT-pipeline-v2":
-            return parent
-    pytest.skip(
-        "HFT-pipeline-v2 monorepo root not found — lob-backtester is checked "
-        "out standalone. Integration tests in this file require the monorepo "
-        "layout (data/exports/..., lob-model-trainer/outputs/...) and skip "
-        "cleanly when that's absent (e.g., on CI, on a fresh clone)."
-    )
+    from hft_contracts._testing import require_monorepo_root
+
+    return require_monorepo_root()
 
 
 def load_single_day_data(

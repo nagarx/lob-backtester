@@ -1,0 +1,89 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-progress runs on the same ref when a new commit lands. Saves
+# runner minutes when a developer force-pushes a fix over a failing run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Minimum GITHUB_TOKEN permissions — OpenSSF least-privilege. This workflow
+# only reads repo contents (this repo + hft-contracts sibling) and writes no
+# artifacts, so `contents: read` is sufficient. The sibling checkout uses
+# the same token; no elevated scope needed because hft-contracts is public.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: pytest (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Checkout (lob-backtester)
+        uses: actions/checkout@v4
+
+      # Sibling checkout BEFORE setup-python's cache — see project CLAUDE.md
+      # §"Inter-Repo Topology". lob-backtester imports from hft_contracts at
+      # three sites (loader.py, signal_manifest.py re-export shim, prices.py).
+      # The pyproject.toml declares `"hft-contracts"` as a bare-name dep, so
+      # pip's default PyPI resolver would fail — hft-contracts is published
+      # only on GitHub (github.com/nagarx/hft-contracts). Sibling-install via
+      # a local checkout is the deterministic path that works regardless of
+      # publishing status.
+      - name: Checkout hft-contracts
+        uses: actions/checkout@v4
+        with:
+          repository: nagarx/hft-contracts
+          path: _deps/hft-contracts
+          ref: main
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install (siblings first, then this repo with dev extras)
+        # Install order matters: sibling editables first so pip sees them
+        # already satisfying the `hft-contracts` bare-name requirement; then
+        # install lob-backtester itself with the dev extra (pytest, pytest-cov,
+        # mypy, ruff). The `torch` optional extra is deliberately skipped on
+        # CI — ~8 real-data integration tests require BOTH torch AND a local
+        # data/exports/ tree, and CI has neither; those tests skip at runtime
+        # via `pytest.mark.skipif(not TORCH_AVAILABLE)`. Installing torch on
+        # CI would add ~60s per matrix cell for no test-coverage gain.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e _deps/hft-contracts
+          pip install -e '.[dev]'
+          # Log resolved versions — hft-contracts commit SHA + numpy aid
+          # cross-version drift triage.
+          python -c "import hft_contracts, numpy, sys; print(f'Python {sys.version.split()[0]}  |  hft_contracts {hft_contracts.__version__}  |  numpy {numpy.__version__}')"
+
+      - name: Run tests
+        # Expected on fresh CI (2026-04-21): 359 passing + 8 skipped per root
+        # CLAUDE.md Phase II hardening close-out stamp. The 8 skips are
+        # torch + real-data gated (test_integration_real_data.py).
+        # Override pyproject's `addopts = -v --tb=short` to `-q --tb=short`
+        # for compact CI output; the pyproject-declared verbose mode is for
+        # local dev, not CI log volume.
+        run: pytest -q --tb=short -o addopts=""
+
+      - name: Lint (non-blocking)
+        # ruff is in the dev extra; config lives in pyproject.toml
+        # (`[tool.ruff]` line-length=100, target py3.10, select E/F/I/W,
+        # ignore E501). Continue-on-error keeps the exit code visible
+        # (yellow/red) rather than silenced to green by `|| true`.
+        continue-on-error: true
+        run: ruff check src tests

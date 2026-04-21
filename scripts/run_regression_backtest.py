@@ -128,6 +128,25 @@ def main():
                         help="Use deep ITM costs (delta=0.95, spread=$0.005)")
 
     parser.add_argument("--output-dir", type=str, default="outputs/backtests/")
+
+    # Phase V.A.5 (2026-04-21): Phase II CompatibilityContract version-skew
+    # detection for standalone-script callers. Closes the gap left by SB-1
+    # (which wired the orchestrator-driven path via ExperimentRunner.
+    # _expected_compatibility_fields but left script callers bypassing the
+    # partial-assertion API). Optional — the default (None) leaves
+    # validate=True tamper detection active but skips the
+    # primary_horizon assertion, matching pre-V.A.5 behavior for legacy
+    # scripts that don't care about version-skew.
+    parser.add_argument(
+        "--primary-horizon-idx",
+        type=int,
+        default=None,
+        help=(
+            "Phase II SB-1 partial-assertion check: if supplied, verifies "
+            "signal_metadata.compatibility.primary_horizon_idx matches the "
+            "given value. Skipped when omitted (backward-compatible)."
+        ),
+    )
     args = parser.parse_args()
 
     signal_dir = Path(args.signals)
@@ -151,7 +170,17 @@ def main():
         m = signal_metadata.get("metrics", {})
         print(f"  Model R²={m.get('r2', '?')}, IC={m.get('ic', '?')}")
 
-    data = BacktestData.from_signal_dir(str(signal_dir))
+    expected_fields = (
+        {"primary_horizon_idx": args.primary_horizon_idx}
+        if args.primary_horizon_idx is not None
+        else None
+    )
+    data = BacktestData.from_signal_dir(
+        str(signal_dir),
+        expected_fields=expected_fields,
+    )
+    if expected_fields is not None:
+        print(f"  Phase II check: primary_horizon_idx={args.primary_horizon_idx} ✓")
     n = len(data)
     print(f"  Loaded {n:,} samples")
 

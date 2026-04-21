@@ -122,6 +122,21 @@ def main():
     parser.add_argument("--manifest", type=str, default=None,
                         help="Path to hft-ops experiment manifest YAML")
 
+    # Phase V.A.5 (2026-04-21): Phase II CompatibilityContract version-skew
+    # detection for standalone-script callers. See run_regression_backtest.py
+    # for the parallel wiring + rationale. Optional — default None preserves
+    # pre-V.A.5 behavior (tamper detection only, no partial assertion).
+    parser.add_argument(
+        "--primary-horizon-idx",
+        type=int,
+        default=None,
+        help=(
+            "Phase II SB-1 partial-assertion check: if supplied, verifies "
+            "signal_metadata.compatibility.primary_horizon_idx matches the "
+            "given value. Skipped when omitted (backward-compatible)."
+        ),
+    )
+
     args = parser.parse_args()
 
     signal_dir = Path(args.signals)
@@ -149,7 +164,17 @@ def main():
             signal_metadata = json.load(f)
         print(f"  Model samples: {signal_metadata.get('total_samples', '?'):,}")
 
-    data = BacktestData.from_signal_dir(str(signal_dir))
+    expected_fields = (
+        {"primary_horizon_idx": args.primary_horizon_idx}
+        if args.primary_horizon_idx is not None
+        else None
+    )
+    data = BacktestData.from_signal_dir(
+        str(signal_dir),
+        expected_fields=expected_fields,
+    )
+    if expected_fields is not None:
+        print(f"  Phase II check: primary_horizon_idx={args.primary_horizon_idx} ✓")
     n = len(data)
     print(f"  Loaded {n:,} samples")
 

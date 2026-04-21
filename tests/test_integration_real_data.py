@@ -51,13 +51,30 @@ class LoadedTestData:
 
 
 def get_project_root() -> Path:
-    """Get the HFT-pipeline-v2 root directory."""
+    """Get the HFT-pipeline-v2 root directory.
+
+    When lob-backtester is checked out standalone (e.g., on CI), this
+    directory doesn't exist — the whole ``TestBacktesterWithRealData``
+    class depends on paths that only resolve inside the monorepo layout.
+    Per hft-rules §6 (tests document behavior; no tautological crashes),
+    we skip the enclosing test cleanly rather than raising a hard
+    ``RuntimeError`` that masquerades as a legitimate test failure.
+
+    Callers expect this fixture helper to be invoked LAZILY from inside
+    a pytest fixture (e.g., ``data_dir`` / ``model_dir`` below), so
+    ``pytest.skip()`` propagates correctly to the enclosing test.
+    """
     current = Path(__file__).resolve()
     # Navigate up from lob-backtester/tests/test_integration_real_data.py
     for parent in current.parents:
         if parent.name == "HFT-pipeline-v2":
             return parent
-    raise RuntimeError("Could not find HFT-pipeline-v2 root directory")
+    pytest.skip(
+        "HFT-pipeline-v2 monorepo root not found — lob-backtester is checked "
+        "out standalone. Integration tests in this file require the monorepo "
+        "layout (data/exports/..., lob-model-trainer/outputs/...) and skip "
+        "cleanly when that's absent (e.g., on CI, on a fresh clone)."
+    )
 
 
 def load_single_day_data(

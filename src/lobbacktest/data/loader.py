@@ -181,7 +181,6 @@ class DataLoader:
         all_prices = []
         day_boundaries = []
         days = []
-        contract_validated = False
 
         current_idx = 0
 
@@ -211,13 +210,28 @@ class DataLoader:
                 with open(meta_file) as f:
                     metadata = json.load(f)
 
-            if not contract_validated and metadata.get("schema_version"):
+            # C-4 (Phase O Cycle 1, 2026-05-04): mirrors trainer C-2 + C-3 —
+            # validate every day, fail-loud on missing schema_version.
+            # Producer always emits this field at v3.0; absence is a
+            # contract violation per hft-rules §8.
+            if "schema_version" not in metadata:
+                raise ContractError(
+                    f"Export metadata for {date} has no 'schema_version' "
+                    f"field (or *_metadata.json is missing). "
+                    f"Cannot verify contract compatibility. "
+                    f"Re-export with the latest feature extractor "
+                    f"(Phase O Cycle 1+)."
+                )
+            try:
                 warnings = validate_export_contract(
                     metadata, strict_completeness=False
                 )
-                for w in warnings:
-                    logger.warning("Contract warning (%s): %s", date, w)
-                contract_validated = True
+            except ContractError as exc:
+                raise ContractError(
+                    f"Export contract violation for {date}: {exc}"
+                ) from exc
+            for w in warnings:
+                logger.warning("Contract warning (%s): %s", date, w)
 
             norm_file = split_dir / f"{date}_normalization.json"
             norm_params = (
@@ -290,12 +304,25 @@ class DataLoader:
             with open(meta_file) as f:
                 metadata = json.load(f)
 
-        if metadata.get("schema_version"):
+        # C-4 (Phase O Cycle 1, 2026-05-04): fail-loud on missing
+        # schema_version. Mirrors the per-day validator in `load()`.
+        if "schema_version" not in metadata:
+            raise ContractError(
+                f"Export metadata for {date} has no 'schema_version' field "
+                f"(or *_metadata.json is missing). Cannot verify contract "
+                f"compatibility. Re-export with the latest feature extractor "
+                f"(Phase O Cycle 1+)."
+            )
+        try:
             warnings = validate_export_contract(
                 metadata, strict_completeness=False
             )
-            for w in warnings:
-                logger.warning("Contract warning (%s): %s", date, w)
+        except ContractError as exc:
+            raise ContractError(
+                f"Export contract violation for {date}: {exc}"
+            ) from exc
+        for w in warnings:
+            logger.warning("Contract warning (%s): %s", date, w)
 
         norm_file = split_dir / f"{date}_normalization.json"
         norm_params = (

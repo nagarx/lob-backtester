@@ -56,11 +56,17 @@ class TotalReturn(Metric):
             {"TotalReturn": cumulative_return}
 
         Edge cases:
-            - Empty returns: 0.0
-            - All zeros: 0.0
+            - Empty returns: NaN (undefined — per Phase X.3 Empirical Trust 2026-05-05)
+            - All zeros: 0.0 (defined — legitimate no-return)
+
+        Phase X.3 (2026-05-05): Pre-fix returned 0.0 on empty/non-finite,
+        indistinguishable from "all-zeros 0% return". Now NaN. Per hft-rules §8.
         """
+        # Phase X.3 Empirical Trust (2026-05-05): NaN on undefined input
+        # (empty / non-finite returns). Pre-X.3 returned 0.0, indistinguishable
+        # from a legitimate "no net P&L" zero return.
         if not self.validate_returns(returns):
-            return {self.name: 0.0}
+            return {self.name: float("nan")}
 
         # Compound returns: (1+r1) * (1+r2) * ... - 1
         cumulative = np.prod(1 + returns) - 1
@@ -132,16 +138,21 @@ class AnnualReturn(Metric):
             {"AnnualReturn": annualized_return}
 
         Edge cases:
-            - Empty returns: 0.0
-            - Zero periods: 0.0
-            - Negative total (loss): Returns negative annualized
+            - Empty returns: NaN (undefined — per Phase X.3 2026-05-05)
+            - Zero periods: NaN (undefined)
+            - Negative total <= -1: -1.0 (legitimate 100% loss sentinel — preserved)
+            - Negative total > -1: negative annualized (defined)
+
+        Phase X.3 (2026-05-05): Pre-fix returned 0.0 on empty/non-finite,
+        indistinguishable from a legitimate "0 net return". Now NaN.
+        Per hft-rules §8.
         """
         if not self.validate_returns(returns):
-            return {self.name: 0.0}
+            return {self.name: float("nan")}
 
         n_periods = len(returns)
         if n_periods == 0:
-            return {self.name: 0.0}
+            return {self.name: float("nan")}
 
         # Get total return (from context or compute)
         if "TotalReturn" in context:

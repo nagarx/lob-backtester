@@ -61,12 +61,18 @@ class TestWinRate:
         assert result["WinRate"] == 0.0
 
     def test_win_rate_no_trades(self):
-        """Test handling of no trades."""
+        """Test handling of no trades.
+
+        Phase X.3 Empirical Trust (2026-05-05): empty trade list returns
+        NaN (was 0.0 pre-X.3). Indistinguishable from legitimate "all-losers
+        0% WR" pre-fix → silent ambiguity. Per hft-rules §8.
+        """
+        import math
         context = {"trade_pnls": np.array([])}
 
         metric = WinRate()
         result = metric.compute(np.array([]), context)
-        assert result["WinRate"] == 0.0
+        assert math.isnan(result["WinRate"])
 
     def test_win_rate_zero_pnl_not_counted_as_win(self):
         """Test that zero P&L is not counted as a win."""
@@ -119,12 +125,17 @@ class TestProfitFactor:
         assert result["ProfitFactor"] == 0.0
 
     def test_profit_factor_no_trades(self):
-        """Test handling of no trades."""
+        """Test handling of no trades.
+
+        Phase X.3 Empirical Trust (2026-05-05): empty trade list returns
+        NaN (was 0.0 pre-X.3). Per hft-rules §8.
+        """
+        import math
         context = {"trade_pnls": np.array([])}
 
         metric = ProfitFactor()
         result = metric.compute(np.array([]), context)
-        assert result["ProfitFactor"] == 0.0
+        assert math.isnan(result["ProfitFactor"])
 
     def test_profit_factor_breakeven(self):
         """Test profit factor = 1 for breakeven."""

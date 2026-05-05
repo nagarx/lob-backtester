@@ -60,24 +60,36 @@ class TestSharpeRatio:
         assert abs(result["SharpeRatio"] - expected) < 1e-10
 
     def test_sharpe_ratio_empty_returns(self):
-        """Test handling of empty returns array."""
+        """Test handling of empty returns array.
+
+        Phase X.3 Empirical Trust (2026-05-05): undefined → NaN (was 0.0).
+        """
+        import math
         metric = SharpeRatio()
         result = metric.compute(np.array([]), {})
-        assert result["SharpeRatio"] == 0.0
+        assert math.isnan(result["SharpeRatio"])
 
     def test_sharpe_ratio_single_return(self):
-        """Test handling of single return (std undefined)."""
+        """Test handling of single return (std undefined).
+
+        Phase X.3: NaN (was 0.0).
+        """
+        import math
         metric = SharpeRatio()
         result = metric.compute(np.array([0.01]), {})
-        assert result["SharpeRatio"] == 0.0
+        assert math.isnan(result["SharpeRatio"])
 
     def test_sharpe_ratio_zero_std(self):
-        """Test handling of zero standard deviation."""
-        # All returns are the same
+        """Test handling of zero standard deviation.
+
+        Phase X.3: NaN (was 0.0). Sharpe with std=0 is genuinely undefined
+        (ratio mean/std → mean/0 → ±inf or 0/0 → NaN).
+        """
+        import math
         returns = np.array([0.01, 0.01, 0.01, 0.01])
         metric = SharpeRatio()
         result = metric.compute(returns, {})
-        assert result["SharpeRatio"] == 0.0
+        assert math.isnan(result["SharpeRatio"])
 
     def test_sharpe_ratio_negative_mean(self):
         """Test that negative mean produces negative Sharpe."""
@@ -135,10 +147,14 @@ class TestSortinoRatio:
         assert result["SortinoRatio"] < 0
 
     def test_sortino_ratio_empty_returns(self):
-        """Test handling of empty returns."""
+        """Test handling of empty returns.
+
+        Phase X.3 Empirical Trust (2026-05-05): undefined → NaN (was 0.0).
+        """
+        import math
         metric = SortinoRatio()
         result = metric.compute(np.array([]), {})
-        assert result["SortinoRatio"] == 0.0
+        assert math.isnan(result["SortinoRatio"])
 
 
 class TestMaxDrawdown:
@@ -208,10 +224,15 @@ class TestMaxDrawdown:
         assert abs(result["MaxDrawdown"] - expected) < 0.01
 
     def test_max_drawdown_empty_returns(self):
-        """Test handling of empty returns."""
+        """Test handling of empty returns.
+
+        Phase X.3 Empirical Trust (2026-05-05 / Phase B.1): empty input is
+        undefined, NOT 0% drawdown. Returns NaN. Per hft-rules §8.
+        """
+        import math
         metric = MaxDrawdown()
         result = metric.compute(np.array([]), {})
-        assert result["MaxDrawdown"] == 0.0
+        assert math.isnan(result["MaxDrawdown"])
 
 
 class TestCalmarRatio:
@@ -242,7 +263,14 @@ class TestCalmarRatio:
         assert abs(result["CalmarRatio"] - expected) < 1e-10
 
     def test_calmar_ratio_zero_drawdown(self):
-        """Test that zero drawdown returns 0 (undefined)."""
+        """Test that zero drawdown returns NaN (genuinely undefined).
+
+        Phase X.3 Empirical Trust (2026-05-05 / Phase B.1): zero drawdown
+        means division by zero in Calmar = AnnualReturn / MaxDrawdown.
+        Genuinely undefined; pre-fix returned 0.0 (silent fabrication).
+        Per hft-rules §8.
+        """
+        import math
         context = {
             "AnnualReturn": 0.20,
             "MaxDrawdown": 0.0,
@@ -250,7 +278,7 @@ class TestCalmarRatio:
 
         metric = CalmarRatio()
         result = metric.compute(np.array([0.01, 0.02]), context)
-        assert result["CalmarRatio"] == 0.0
+        assert math.isnan(result["CalmarRatio"])
 
     def test_calmar_ratio_negative_return(self):
         """Test negative annual return produces negative Calmar."""

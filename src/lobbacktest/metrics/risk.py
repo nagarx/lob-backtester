@@ -85,21 +85,28 @@ class SharpeRatio(Metric):
             {"SharpeRatio": sharpe_ratio}
 
         Edge cases:
-            - Empty returns: 0.0
-            - Zero std: 0.0 (cannot compute ratio)
-            - Negative mean with positive std: negative SR
+            - Empty returns: NaN (undefined — per Phase X.3 Empirical Trust 2026-05-05)
+            - len(returns) < 2: NaN (single-sample std is undefined)
+            - Zero std: NaN (cannot compute ratio — flat returns)
+            - Negative mean with positive std: negative SR (defined)
+
+        Phase X.3 (2026-05-05): Pre-fix returned 0.0 for ALL undefined cases,
+        indistinguishable from "Sharpe = 0 with finite std" (real result).
+        Now returns NaN for genuinely undefined cases. Display layer formats
+        NaN as "N/A" — operator can distinguish "no trades" from "0 SR".
+        Per hft-rules §8 ("never silently drop, clamp, or 'fix' data").
         """
         if not self.validate_returns(returns):
-            return {self.name: 0.0}
+            return {self.name: float("nan")}
 
         if len(returns) < 2:
-            return {self.name: 0.0}
+            return {self.name: float("nan")}
 
         mean_return = np.mean(returns)
         std_return = np.std(returns, ddof=0)  # Population std
 
         if std_return == 0 or not np.isfinite(std_return):
-            return {self.name: 0.0}
+            return {self.name: float("nan")}
 
         # Get annualization factor
         if "annualization_factor" in context:
@@ -178,14 +185,21 @@ class SortinoRatio(Metric):
             {"SortinoRatio": sortino_ratio}
 
         Edge cases:
-            - No negative returns: Uses small epsilon to avoid Inf
+            - Empty returns / len < 2: NaN (undefined — per Phase X.3 2026-05-05)
+            - No downside + positive mean: 100.0 (documented "great strategy" cap)
+            - No downside + zero/negative mean: NaN (undefined 0/0 case)
             - All negative: Normal computation
+
+        Phase X.3 (2026-05-05): Pre-fix returned 0.0 for empty/short returns
+        AND for the no-downside + zero-mean case, indistinguishable from a
+        legitimate Sortino=0. Now returns NaN. The 100.0 cap for no-downside
+        + positive-mean is preserved (documented sentinel).
         """
         if not self.validate_returns(returns):
-            return {self.name: 0.0}
+            return {self.name: float("nan")}
 
         if len(returns) < 2:
-            return {self.name: 0.0}
+            return {self.name: float("nan")}
 
         mean_return = np.mean(returns)
 
@@ -196,11 +210,12 @@ class SortinoRatio(Metric):
 
         # Handle case with no downside
         if downside_std == 0 or not np.isfinite(downside_std):
-            # No downside risk - return large positive if mean > 0, 0 otherwise
+            # No downside risk - 100.0 sentinel only if positive mean
             if mean_return > 0:
-                return {self.name: 100.0}  # Cap at reasonable value
+                return {self.name: 100.0}  # Documented cap for "great strategy"
             else:
-                return {self.name: 0.0}
+                # 0/0 form — Sortino is genuinely undefined
+                return {self.name: float("nan")}
 
         # Get annualization factor
         if "annualization_factor" in context:
@@ -268,11 +283,16 @@ class MaxDrawdown(Metric):
             {"MaxDrawdown": max_drawdown} where max_drawdown in [0, 1]
 
         Edge cases:
-            - Monotonically increasing: 0.0 (no drawdown)
-            - Total loss: 1.0 (100% drawdown)
+            - Monotonically increasing: 0.0 (no drawdown — defined)
+            - Total loss: 1.0 (100% drawdown — defined)
+            - Empty/non-finite returns: NaN (undefined — per Phase X.3 2026-05-05)
+
+        Phase X.3 (2026-05-05): Pre-fix returned 0.0 on empty/non-finite,
+        indistinguishable from "monotonically increasing 0% drawdown".
+        Now NaN. Per hft-rules §8.
         """
         if not self.validate_returns(returns):
-            return {self.name: 0.0}
+            return {self.name: float("nan")}
 
         # Get or compute equity curve
         if "equity_curve" in context:
@@ -283,7 +303,7 @@ class MaxDrawdown(Metric):
             equity = initial * np.cumprod(1 + returns)
 
         if len(equity) == 0:
-            return {self.name: 0.0}
+            return {self.name: float("nan")}
 
         # Compute running maximum (peak)
         peak = np.maximum.accumulate(equity)
@@ -363,11 +383,16 @@ class CalmarRatio(Metric):
             {"CalmarRatio": calmar_ratio}
 
         Edge cases:
-            - Zero drawdown: 0.0 (undefined)
-            - Negative return: negative Calmar
+            - Empty/non-finite returns: NaN (undefined — Phase X.3 2026-05-05)
+            - Zero drawdown: NaN (undefined — division by zero)
+            - Negative return: negative Calmar (defined)
+
+        Phase X.3 (2026-05-05): Pre-fix returned 0.0 for both empty input
+        AND zero drawdown, indistinguishable from a legitimate "Calmar=0
+        with finite max_dd" result. Now NaN. Per hft-rules §8.
         """
         if not self.validate_returns(returns):
-            return {self.name: 0.0}
+            return {self.name: float("nan")}
 
         # Get or compute annual return
         if "AnnualReturn" in context:
@@ -393,9 +418,9 @@ class CalmarRatio(Metric):
             drawdown = np.where(peak > 0, (peak - equity) / peak, 0.0)
             max_dd = float(np.max(drawdown))
 
-        # Compute Calmar
+        # Compute Calmar — zero drawdown = division by zero = undefined
         if max_dd == 0 or not np.isfinite(max_dd):
-            return {self.name: 0.0}
+            return {self.name: float("nan")}
 
         calmar = annual_return / max_dd
 

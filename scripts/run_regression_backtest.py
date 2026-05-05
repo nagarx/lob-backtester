@@ -83,8 +83,15 @@ def run_one_backtest(
         print(f"  Strategy: {strategy.name}")
         print(f"  Trades: {summary['n_entries']}, Rate: {summary['trade_rate']:.3f}")
         print(f"  Avg hold: {summary['avg_hold_events']:.1f} events")
-        for k in ["total_return", "sharpe_ratio", "sortino_ratio", "max_drawdown",
-                   "win_rate", "profit_factor", "expectancy"]:
+        # 2026-05-05 P0 fix: metric keys are PascalCase (class names, per
+        # vectorized.py:646-651 `_compute_metrics` returns {metric.name: value}).
+        # Pre-fix this loop used lowercase_snake keys (`total_return`, `win_rate`, etc.)
+        # → silently dropped EVERY metric (the `if k in summary` guard always False).
+        # All R9-R14 backtests printed with `--no-zero-dte` AND with `--deep-itm`
+        # showed empty inline metrics + 0.0000 in summary table per the same key-case
+        # bug. Fix: use canonical PascalCase keys.
+        for k in ["TotalReturn", "SharpeRatio", "SortinoRatio", "MaxDrawdown",
+                   "WinRate", "ProfitFactor", "Expectancy"]:
             if k in summary:
                 print(f"  {k}: {summary[k]:.4f}")
 
@@ -94,6 +101,13 @@ def run_one_backtest(
         summary["option_final_equity"] = round(option_result.option_final_equity, 2)
         summary["option_return_pct"] = round(option_result.option_total_return * 100, 2)
         summary["option_n_trades"] = option_result.n_trades
+        # 2026-05-05 P0 fix: persist option_win_rate + option_avg_pnl into summary
+        # (pre-fix these only printed inline; downstream JSON consumers + summary
+        # table couldn't access them). Conditional on n_trades > 0 because empty
+        # trade lists would produce NaN means / undefined win rates.
+        if option_result.n_trades > 0:
+            summary["option_win_rate"] = round(option_result.option_win_rate, 4)
+            summary["option_avg_pnl"] = round(float(option_result.option_trade_pnls.mean()), 4)
         if verbose:
             print(f"  --- 0DTE Option P&L ---")
             print(f"  Final equity: ${option_result.option_final_equity:,.2f}")
@@ -250,19 +264,34 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"\n{'=' * 70}")
+    print(f"\n{'=' * 90}")
     print(f"  SUMMARY: {args.name}")
-    print(f"{'=' * 70}")
-    print(f"  {'Threshold':<20} {'Trades':>7} {'Rate':>7} {'WinRate':>8} "
-          f"{'Sharpe':>8} {'TotalRet':>9} {'OptRet':>8}")
-    print(f"  {'-' * 20} {'-' * 7} {'-' * 7} {'-' * 8} "
-          f"{'-' * 8} {'-' * 9} {'-' * 8}")
+    print(f"{'=' * 90}")
+    # 2026-05-05 P0 fix: split table into two metric groups for clarity:
+    # SPOT-leg metrics (stock equity, computed by VectorizedEngine via all_metrics
+    #   list — WinRate over trade_pnls is the equity-curve win rate)
+    # OPTION-leg metrics (0DTE option P&L from ZeroDtePnLTransformer — separate
+    #   population because option leverage + theta + spread vs stock returns)
+    # Pre-fix these were conflated in one row → readers wrongly compared.
+    print(f"  {'Threshold':<20} {'Trades':>7} {'Rate':>7} | "
+          f"{'SpotWR%':>7} {'Sharpe':>8} {'SpotRet%':>9} | "
+          f"{'OptWR%':>7} {'OptRet':>8}")
+    print(f"  {'-' * 20} {'-' * 7} {'-' * 7} + "
+          f"{'-' * 7} {'-' * 8} {'-' * 9} + "
+          f"{'-' * 7} {'-' * 8}")
 
     for r in all_results:
+        # PascalCase keys per vectorized.py:646-651 _compute_metrics dict-keying.
+        # Pre-fix used lowercase_snake → silent zero across all R9-R14 BACKTEST_INDEX
+        # entries. Use .get(..., 0) defensively for flexibility on metric availability.
+        spot_wr = r.get("WinRate", 0) * 100  # WinRate is fraction; convert to %
+        spot_sharpe = r.get("SharpeRatio", 0)
+        spot_total = r.get("TotalReturn", 0) * 100  # TotalReturn is fraction; convert
         opt_ret = r.get("option_return_pct", 0)
-        print(f"  {r['label']:<20} {r['n_entries']:>7} {r['trade_rate']:>7.3f} "
-              f"{r.get('win_rate', 0):>8.4f} {r.get('sharpe_ratio', 0):>8.2f} "
-              f"{r.get('total_return', 0):>9.4f} {opt_ret:>7.2f}%")
+        opt_wr = r.get("option_win_rate", 0) * 100  # option_win_rate is fraction
+        print(f"  {r['label']:<20} {r['n_entries']:>7} {r['trade_rate']:>7.3f} | "
+              f"{spot_wr:>6.2f}% {spot_sharpe:>+8.2f} {spot_total:>+8.2f}% | "
+              f"{opt_wr:>6.2f}% {opt_ret:>+7.2f}%")
 
     output_file = output_dir / f"{args.name}.json"
     with open(output_file, "w") as f:

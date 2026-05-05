@@ -119,14 +119,24 @@ class BacktestRegistry:
         if equity_curve is not None:
             np.save(run_dir / "equity_curve.npy", equity_curve)
 
+        # 2026-05-05 P0 fix: read PascalCase metric keys (canonical from
+        # `VectorizedEngine._compute_metrics` at `vectorized.py:646-651`
+        # which dict-keys by `metric.name` = class name e.g. `WinRate`,
+        # `SharpeRatio`, `TotalReturn`, `MaxDrawdown`). Pre-fix: registry
+        # silently stored zero for these because callers spread
+        # `**result.metrics` (PascalCase) but the registry read lowercase
+        # keys (`metrics.get('win_rate')` etc.) — same class of bug as the
+        # `run_regression_backtest.py` summary-table bug. Companion fix:
+        # PascalCase preferred, lowercase fallback preserved for callers
+        # that explicitly pass lowercase kwargs (back-compat).
         self._index[run_id] = {
             "name": name,
             "created_at": result["created_at"],
             "total_trades": metrics.get("total_trades", 0),
-            "total_return": metrics.get("total_return", 0),
-            "win_rate": metrics.get("win_rate", 0),
-            "sharpe_ratio": metrics.get("sharpe_ratio", 0),
-            "max_drawdown": metrics.get("max_drawdown", 0),
+            "total_return": metrics.get("TotalReturn", metrics.get("total_return", 0)),
+            "win_rate": metrics.get("WinRate", metrics.get("win_rate", 0)),
+            "sharpe_ratio": metrics.get("SharpeRatio", metrics.get("sharpe_ratio", 0)),
+            "max_drawdown": metrics.get("MaxDrawdown", metrics.get("max_drawdown", 0)),
             "trade_rate": (strategy_metadata or {}).get("trade_rate", 0),
             "option_total_return": (option_metrics or {}).get("option_total_return"),
         }

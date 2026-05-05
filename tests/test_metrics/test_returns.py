@@ -41,13 +41,17 @@ class TestTotalReturn:
         assert abs(result["TotalReturn"] - expected) < 1e-10
 
     def test_empty_returns(self):
-        """Empty returns should give 0."""
+        """Empty returns should give NaN (undefined).
+
+        Phase X.3 Empirical Trust (2026-05-05): undefined → NaN (was 0.0).
+        """
+        import math
         returns = np.array([])
 
         metric = TotalReturn()
         result = metric.compute(returns, {})
 
-        assert result["TotalReturn"] == 0.0
+        assert math.isnan(result["TotalReturn"])
 
     def test_single_return(self):
         """Single return period."""
@@ -117,13 +121,18 @@ class TestAnnualReturn:
         assert abs(result["AnnualReturn"] - expected) < 1e-6
 
     def test_empty_returns(self):
-        """Empty returns should give 0."""
+        """Empty returns should give NaN (undefined).
+
+        Phase X.3 Empirical Trust (2026-05-05 / Phase B.1): undefined → NaN
+        (was 0.0 pre-fix). Per hft-rules §8.
+        """
+        import math
         returns = np.array([])
 
         metric = AnnualReturn()
         result = metric.compute(returns, {})
 
-        assert result["AnnualReturn"] == 0.0
+        assert math.isnan(result["AnnualReturn"])
 
     def test_total_loss(self):
         """Total loss (-100%) should return -1."""
@@ -185,24 +194,33 @@ class TestReturnMetricsEdgeCases:
     """Edge case tests for return metrics."""
 
     def test_nan_in_returns(self):
-        """NaN in returns should be handled gracefully (return 0)."""
+        """NaN in returns should be handled gracefully (return NaN).
+
+        Phase X.3 Empirical Trust (2026-05-05): non-finite input is
+        undefined, not silently 0. validate_returns rejects → NaN.
+        """
+        import math
         returns = np.array([0.01, np.nan, 0.02])
 
         metric = TotalReturn()
         result = metric.compute(returns, {})
 
-        # validate_returns rejects arrays with NaN, returns 0
-        assert result["TotalReturn"] == 0.0
+        # validate_returns rejects arrays with NaN, returns NaN (was 0.0 pre-X.3)
+        assert math.isnan(result["TotalReturn"])
 
     def test_inf_in_returns(self):
-        """Inf in returns should be handled gracefully (return 0)."""
+        """Inf in returns should be handled gracefully (return NaN).
+
+        Phase X.3 Empirical Trust (2026-05-05): non-finite input → NaN.
+        """
+        import math
         returns = np.array([0.01, np.inf, 0.02])
 
         metric = TotalReturn()
         result = metric.compute(returns, {})
 
-        # validate_returns rejects arrays with Inf, returns 0
-        assert result["TotalReturn"] == 0.0
+        # validate_returns rejects arrays with Inf, returns NaN (was 0.0 pre-X.3)
+        assert math.isnan(result["TotalReturn"])
 
     def test_very_small_returns(self):
         """Very small returns should not underflow."""

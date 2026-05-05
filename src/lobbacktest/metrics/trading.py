@@ -64,14 +64,19 @@ class WinRate(Metric):
             {"WinRate": win_rate} where win_rate in [0, 1]
 
         Edge cases:
-            - No trades: 0.0
-            - All winners: 1.0
-            - All losers: 0.0
+            - No trades: NaN (undefined — per Phase X.3 Empirical Trust 2026-05-05)
+            - All winners: 1.0 (defined — legitimate 100% WR)
+            - All losers: 0.0 (defined — legitimate 0% WR)
+
+        Phase X.3 (2026-05-05): Pre-fix returned 0.0 for empty trade list,
+        indistinguishable from "all-losers 0% WR". Now returns NaN to surface
+        the empty-trade-list case loudly (display layer formats NaN as "N/A").
+        Per hft-rules §8 ("never silently drop, clamp, or 'fix' data").
         """
         trade_pnls = context.get("trade_pnls", np.array([]))
 
         if len(trade_pnls) == 0:
-            return {self.name: 0.0}
+            return {self.name: float("nan")}
 
         trade_pnls = np.asarray(trade_pnls)
         n_winning = np.sum(trade_pnls > 0)
@@ -128,14 +133,19 @@ class ProfitFactor(Metric):
             {"ProfitFactor": profit_factor}
 
         Edge cases:
-            - No trades: 0.0
-            - No losses: 100.0 (capped)
-            - No wins: 0.0
+            - No trades: NaN (undefined — per Phase X.3 Empirical Trust 2026-05-05)
+            - No losses: 100.0 (capped — documented sentinel for "great strategy")
+            - No wins: 0.0 (defined — legitimate 0 PF)
+
+        Phase X.3 (2026-05-05): Pre-fix returned 0.0 for empty trade list,
+        indistinguishable from "no winners". Now returns NaN. The
+        no-losses/no-wins capped 100.0 / 0.0 retained per existing
+        documented sentinel convention.
         """
         trade_pnls = context.get("trade_pnls", np.array([]))
 
         if len(trade_pnls) == 0:
-            return {self.name: 0.0}
+            return {self.name: float("nan")}
 
         trade_pnls = np.asarray(trade_pnls)
 

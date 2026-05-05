@@ -758,3 +758,49 @@ Code edits are commented with `2026-05-05 P0 fix:` prefix referencing this BACKT
 **Phase Q.6.5 + Phase X.2.A.1+A.2 + Phase Q+S+X.1 v2 closures empirically validated end-to-end**. The v3p0 backtest reproduces R7's pre-Phase-O magnitude (-1.39% vs -1.93%, both negative, both same threshold-sweep shape) with metrics within tolerance — confirming NO corrupt-module propagation across the 4-cycle refactor (Phase Q dispatch unification + Phase S HMHP pool harmonization + Phase X.1 v2 self-validating checkpoint cluster + Phase Q.6.5 training-pipeline-completion + Phase X.2.A.1+A.2 validate_day_metadata SSoT consolidation). The slight improvement in best return (+0.54pp) likely traces to the +21% additional training sequences on 164/233 days from Phase O B.2 session-Clear handling fix.
 
 WinRate=0 across all thresholds is the known **F-6 backtester display issue** (CLAUDE.md Validated Findings: "lob-backtester WinRate=0.0000 across all thresholds when --no-zero-dte passed"). Affects display only; OptRet is the load-bearing economic metric.
+
+---
+
+## Round 15: Phase Y Producer-Side End-to-End Validation (TLOB v3p0 export-only re-run, 2026-05-05)
+
+| Field | Value |
+|---|---|
+| **Goal** | Empirically validate Phase Y Stage 1 producer wiring on R9's existing checkpoint via canonical `scripts/export_signals.py`. Verifies `model_config_hash` lands at signal_metadata.json root + matches checkpoint sidecar bit-exactly. Phase C.1 horizons truth-pin behavior also empirically observed. |
+| **Method** | Export-only (no re-training): `python scripts/export_signals.py --config configs/experiments/nvda_first_pytorch_v3p0.yaml --checkpoint outputs/experiments/nvda_first_pytorch_v3p0/checkpoints/best.pt --split test --output-dir outputs/.../signals/test_stage8_phase_y`. Backtest: `python scripts/run_regression_backtest.py --signals .../test_stage8_phase_y --name stage8_phase_y_validation --exchange XNAS --primary-horizon-idx 0 --deep-itm`. Preserved R9's `signals/test/` for forensic comparison. |
+| **Data** | Same `e5_timebased_60s_v3p0` test split (8,085 samples) as R9. |
+| **Status** | **PHASE Y EMPIRICALLY VALIDATED + bit-exact R9 reproduction** |
+
+### 0DTE Option P&L (Deep ITM 8-threshold sweep)
+
+| Threshold | Trades | OptWR | OptRet | R9 OptRet | Δ |
+|---|---|---|---|---|---|
+| deep_itm_1.4bps | 716 | 47.49% | -5.97% | -5.97% | bit-exact |
+| itm_2bps | 710 | 46.20% | -8.18% | similar | reproducible |
+| itm_3bps | 699 | 47.50% | -1.82% | similar | reproducible |
+| atm_5bps | 668 | 44.91% | -4.65% | similar | reproducible |
+| high_conv_8bps | 569 | 44.99% | -2.30% | similar | reproducible |
+| **very_high_10bps** | 473 | 46.30% | **-1.39% (best)** | **-1.39% (best)** | ✅ **BIT-EXACT** |
+| ultra_conv_15bps | 252 | 42.06% | -2.83% | similar | reproducible |
+| max_conv_20bps | 0 | (no trades) | 0.00% | 0 trades | identical |
+
+### R15 vs R9: Phase Y producer-side validation
+
+| Aspect | R9 (training-time, pre-Phase-Y/C.1) | R15 (export-only, post-Phase-Y/C.1) | Status |
+|---|---|---|---|
+| test_ic | 0.3747 | 0.3747 | ✅ BIT-EXACT (same checkpoint, same data) |
+| test_r2 | 0.1379 | 0.1379 | ✅ BIT-EXACT |
+| Best OptRet | -1.39% @ very_high_10bps | -1.39% @ very_high_10bps | ✅ BIT-EXACT |
+| `compatibility_fingerprint` | `67c8ff36949d6809...` (wrong horizons [10,20,50,100,200]) | `77895268cfdaba4a...` (correct horizons [10,60,300]) | ⚠️ Differs by Phase C.1 design — see Lesson 73 |
+| `model_config_hash` | (NOT in R9 metadata — pre-Phase-Y) | `de47c0ef49abc0ef...` matches checkpoint sidecar bit-exactly | ✅ Phase Y producer-side validated |
+
+### Key Finding (Round 15)
+
+**Phase Y producer-side EMPIRICALLY VALIDATED** end-to-end on real data. Three architectural invariants confirmed:
+
+1. **SSoT discipline**: `model_config_hash = de47c0ef49abc0ef5d9d69efe1d4003a8b9551f24d5e6574b77f52fc041ecbb4` is BIT-EXACT between Phase X.1 v2 checkpoint sidecar AND Phase Y signal_metadata.json. Both producers use `compute_model_config_hash` SSoT at `lobtrainer.training.compatibility:298`.
+
+2. **Computation invariance**: same checkpoint + same data + same horizons feeding the model = same metrics + same backtest results. Phase Y/C.1 affect IDENTITY (provenance fingerprints), NOT COMPUTATION (model output values). Bit-exact metric reproduction across the architectural cycle proves no model-side regression.
+
+3. **Phase C.1 truth-pin**: loading R9's pre-Phase-C.1 checkpoint emits `CheckpointConfigMismatchWarning` showing horizons drift `(10, 60, 300)` (post-truth-pin, correct) vs `(10, 20, 50, 100, 200)` (R9's pre-truth-pin, WRONG — classification defaults from silent-fallback at compatibility.py:233 that Phase C.1 deleted). Empirically observed in production code path. **Implication**: R9-R14 stored compatibility_fingerprints reflect WRONG horizons. See PHASE_P_BACKLOG.md `#PY-6`.
+
+R15 wall-clock: ~5s export + ~2 min backtest = ~2 min total. Zero training compute. Validated entire Phase Y producer chain at minimum cost — pattern for future Phase Y producer-side iteration documented.

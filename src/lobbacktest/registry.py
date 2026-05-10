@@ -117,7 +117,11 @@ class BacktestRegistry:
             yaml.dump(config_dict, f, default_flow_style=False)
 
         if equity_curve is not None:
-            np.save(run_dir / "equity_curve.npy", equity_curve)
+            # #PY-73 atomic write — SIGKILL mid-write would corrupt the
+            # equity-curve artifact downstream analytics consume.
+            # Migrated 2026-05-11 (hft-contracts v2.7.0).
+            from hft_contracts.atomic_io import atomic_write_npy
+            atomic_write_npy(run_dir / "equity_curve.npy", equity_curve)
 
         # 2026-05-05 P0 fix: read PascalCase metric keys (canonical from
         # `VectorizedEngine._compute_metrics` at `vectorized.py:646-651`

@@ -23,7 +23,12 @@ classifiers = [
 ]
 
 dependencies = [
-    "hft-contracts",
+    # #PY-73 atomic-write SSoT (2026-05-11): pinned >=2.7.0 after
+    # hft-contracts v2.7.0 added `atomic_write_npy` to
+    # `hft_contracts.atomic_io`. Backtester consumes from registry.py:120
+    # (equity_curve.npy persistence — protects against SIGKILL-mid-write
+    # corruption that downstream analytics would silently consume).
+    "hft-contracts>=2.7.0",
     "numpy>=1.24.0",
     "matplotlib>=3.7.0",
     "pyyaml>=6.0",

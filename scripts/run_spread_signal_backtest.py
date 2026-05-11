@@ -454,7 +454,23 @@ def main():
     parser = argparse.ArgumentParser(description="0DTE Backtester: spread_bps Signal")
     parser.add_argument("--export-dir", default=EXPORT_DIR)
     parser.add_argument("--output-dir", default=OUTPUT_DIR)
+    # Phase R-17 F1 (2026-05-11): #PY-129 producer-side compatibility.
+    # Orchestrator at hft-ops/src/hft_ops/stages/backtesting.py:137-138
+    # unconditionally injects --manifest into ALL backtester scripts. Pre-R-17
+    # this script REJECTED --manifest (argparse `unrecognized arguments` error).
+    # This script does not perform per-manifest ledger linkage (no run_id +
+    # iterates over many signal variants per Phase H1 NEW-1 finding) — accept
+    # the flag and explicitly document the no-op for orchestrator UX.
+    parser.add_argument("--manifest", type=str, default=None,
+                        help="Path to hft-ops experiment manifest YAML (accepted for "
+                             "orchestrator compatibility; spread_signal_backtest does NOT "
+                             "write per-manifest ledger records — use run_regression_backtest.py "
+                             "or run_readability_backtest.py for ledger linkage).")
     args = parser.parse_args()
+
+    if args.manifest:
+        # Notice line so operator isn't silently confused about the no-op.
+        log(f"Note: --manifest {args.manifest} accepted for orchestrator compatibility but unused (no ledger linkage from this script)")
 
     start = time.time()
     log("0DTE Backtester: spread_bps Signal (E13 Phase 8)")

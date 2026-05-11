@@ -142,6 +142,12 @@ def main():
                         help="Use deep ITM costs (delta=0.95, spread=$0.005)")
 
     parser.add_argument("--output-dir", type=str, default="outputs/backtests/")
+    parser.add_argument("--manifest", type=str, default=None,
+                        help="Path to hft-ops experiment manifest YAML. When supplied, "
+                             "writes a ledger-linkage record at "
+                             "<manifest_parent>/ledger/runs/<exp_name>_backtest_<args.name>.json "
+                             "for cross-tool traceability (Phase R-17 #PY-129 closure). "
+                             "Backward-compatible: omitting --manifest preserves pre-Phase-R-17 behavior.")
 
     # Phase V.A.5 (2026-04-21): Phase II CompatibilityContract version-skew
     # detection for standalone-script callers. Closes the gap left by SB-1
@@ -305,6 +311,92 @@ def main():
             "results": all_results,
         }, f, indent=2)
     print(f"\n  Saved results to {output_file}")
+
+    # Phase R-17 F1 (2026-05-11): #PY-129 producer-side ledger linkage.
+    # Mirrors run_readability_backtest.py:326-353 with regression-script
+    # adaptations per H1 agent ground-truth review:
+    #   - Regression script lacks `run_id` variable (no BacktestRegistry) →
+    #     uses args.name as the natural ledger key.
+    #   - Regression script's `all_results` is a list of 8 threshold dicts
+    #     (NOT a single BacktestResult aggregate) → emits hybrid record:
+    #     top-level summary from best-by-OptRet + full all_thresholds breakdown.
+    #   - Adds `option_return_pct` + `option_win_rate` (R-16a execution-aligned
+    #     metrics; rationale per Agent B 2026-05-11 caveat: "execution-aligned
+    #     cost gate" is the PRIMARY scientific signal).
+    #   - Narrower exception class set per hft-rules §8 — no silent swallow.
+    #   - Inline float() conversions on numpy scalars to avoid default=str
+    #     silent-coerce hazard (hft-rules §8 violation in readability template).
+    if args.manifest:
+        try:
+            import yaml as _yaml
+            manifest_path = Path(args.manifest)
+            if manifest_path.exists():
+                with open(manifest_path) as f:
+                    manifest_data = _yaml.safe_load(f)
+                manifest_exp_name = manifest_data.get("experiment", {}).get("name", "unknown")
+                ledger_path = manifest_path.parent.parent / "ledger" / "runs"
+                ledger_path.mkdir(parents=True, exist_ok=True)
+
+                # Pick best across 8 thresholds for top-level summary.
+                # Phase R-17 v2 mid-impl refinement (Q2): when --zero-dte enabled,
+                # use OptRet (R-16a's PRIMARY metric); else use TotalReturn (spot).
+                # Closes silent-coerce hazard where --no-zero-dte yields absent
+                # option_return_pct keys, leaving best = arbitrary first-tie.
+                if args.zero_dte and any("option_return_pct" in r for r in all_results):
+                    best = max(
+                        all_results,
+                        key=lambda r: float(r.get("option_return_pct", float("-inf"))),
+                    )
+                else:
+                    best = max(
+                        all_results,
+                        key=lambda r: float(r.get("TotalReturn", float("-inf"))),
+                    )
+
+                record = {
+                    "experiment_name": manifest_exp_name,
+                    "stage": "backtesting",
+                    "status": "completed",
+                    "run_id": args.name,  # args.name as ledger key (no BacktestRegistry)
+                    # Top-level summary (best-of by OptRet)
+                    "best_threshold": str(best.get("label", "unknown")),
+                    "best_option_return_pct": float(best.get("option_return_pct", 0.0)),
+                    "best_option_win_rate": float(best.get("option_win_rate", 0.0)),
+                    "best_n_entries": int(best.get("n_entries", 0)),
+                    "best_total_return": float(best.get("TotalReturn", 0.0)),
+                    "best_win_rate": float(best.get("WinRate", 0.0)),
+                    "best_sharpe_ratio": float(best.get("SharpeRatio", 0.0)),
+                    # Full per-threshold breakdown (R-16a hypothesis-aligned)
+                    "all_thresholds": [
+                        {
+                            "label": str(r.get("label", "unknown")),
+                            "n_entries": int(r.get("n_entries", 0)),
+                            "win_rate": float(r.get("WinRate", 0.0)),
+                            "total_return": float(r.get("TotalReturn", 0.0)),
+                            "option_return_pct": float(r.get("option_return_pct", 0.0)),
+                            "option_win_rate": float(r.get("option_win_rate", 0.0)),
+                        }
+                        for r in all_results
+                    ],
+                    # Provenance + execution context
+                    "holding_policy": holding_policy.policy_name,
+                    "exchange": args.exchange,
+                    "zero_dte_enabled": args.zero_dte,
+                    "signal_dir": str(signal_dir),
+                    "manifest": str(manifest_path),
+                }
+                record_path = ledger_path / f"{manifest_exp_name}_backtest_{args.name}.json"
+                with open(record_path, "w") as f:
+                    json.dump(record, f, indent=2)
+                print(f"  Updated hft-ops ledger: {record_path}")
+        except (FileNotFoundError, PermissionError, OSError, KeyError,
+                AttributeError, TypeError, _yaml.YAMLError) as e:
+            # Narrow exception set per hft-rules §8 — re-raise unexpected types.
+            # Phase R-17 v2 mid-impl refinement (Q3): added AttributeError +
+            # TypeError to handle realistic chains like
+            # `manifest_data.get("experiment", {}).get(...)` when YAML has
+            # `experiment: null` or non-dict root.
+            print(f"  WARNING: Failed to update hft-ops ledger: {e}")
 
 
 if __name__ == "__main__":

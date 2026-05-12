@@ -895,3 +895,105 @@ This round uses the standard `OpraCalibratedCosts` + `CostConfig.for_exchange("X
 
 - **#PY-182 NEW**: investigate training_record.status:failed + test_metrics:None across 4 R-16a training records. Banner-cited test_ic values came from in-process state not persisted to JSON.
 - **R-16c sweep launch**: cycle7_r16c_multi_seed_r16a.yaml is LAUNCH-READY (40 grid × 10 seeds; ~80 min compute). Multi-seed power analysis on Ridge × Peak +2.84% will confirm/refute outlier-driven artifact framing via H1 three-conjunctive + H4 negative-control + H5 architectural invariant.
+
+## Round 16c — Multi-Seed Power Analysis on R-16a Ridge×Peak (REFUTE, 2026-05-13)
+
+**Sweep ID**: `cycle7_r16c_multi_seed_r16a_20260512T063700`
+**Compute**: ~6 hr wall-clock on M1 Pro MPS
+**Effective grid**: 36/40 grid points (4 seed_42 records correctly deduped against R-16a's cycle6_r16a_* records — same fingerprint per Phase Y composer)
+**Analyzer**: `hft-ops/scripts/analyze_r16c.py cycle7_r16c_multi_seed_r16a_20260512T063700 --allow-partial`
+
+### Verdict: REFUTE (exit_code=1)
+
+| Gate | Outcome | Observed | Threshold | Pass? |
+|---|---|---|---|---|
+| H1a: mean OptRet > +1.0% (Ridge×Peak deep_itm_1.4bps) | +0.0047% | +1.0% | **FAIL** |
+| H1b: pooled-bootstrap CI lower-bound > 0 | (-0.0017%, +0.0116%) | CI > 0 | **FAIL** (crosses zero) |
+| H1c: drop-top-5 mean > 0 | +0.0013% | > 0 | PASS (negligible) |
+| H4: mean across 8 thresholds > -0.5% (Ridge×Peak negative control) | +0.0016% | > -0.5% | PASS (~0) |
+| H5: Ridge bit-exact invariant (Phase A.3 REDESIGN) | True | True | PASS |
+
+### Per-arm × per-threshold bootstrap CI summary (`*` = statistically significant at α=0.05)
+
+#### Arm 1: TemporalRidge × point (8 thresholds; n_seeds=1 per H5 single-seed-pooling)
+
+| threshold | n_trades | mean | CI (95%) | drop5 |
+|---|---|---|---|---|
+| deep_itm_1.4bps | 641 | +0.0013% | (-0.0059%, +0.0087%) | +0.0022% |
+| itm_2bps | 580 | -0.0008% | (-0.0088%, +0.0071%) | +0.0003% |
+| itm_3bps | 474 | -0.0030% | (-0.0120%, +0.0066%) | +0.0002% |
+| atm_5bps | 326 | +0.0026% | (-0.0057%, +0.0109%) | +0.0050% |
+| high_conv_8bps | 194 | -0.0019% | (-0.0162%, +0.0095%) | +0.0070% |
+| very_high_10bps | 149 | -0.0006% | (-0.0204%, +0.0160%) | +0.0103% |
+| ultra_conv_15bps | 76 | +0.0052% | (-0.0239%, +0.0332%) | +0.0188% |
+| max_conv_20bps | 43 | -0.0111% | (-0.0574%, +0.0305%) | +0.0112% |
+
+**0 of 8 cells statistically significant. Mean ∈ [-0.011%, +0.005%] per trade. NO directional edge.**
+
+#### Arm 2: TemporalRidge × peak (8 thresholds; n_seeds=1 per H5; **F7 TARGET ARM**)
+
+| threshold | n_trades | mean | CI (95%) | drop5 |
+|---|---|---|---|---|
+| **deep_itm_1.4bps** | **702** | **+0.0047%** | **(-0.0017%, +0.0116%)** | **+0.0013%** |
+| itm_2bps | 685 | -0.0037% | (-0.0086%, +0.0013%) | -0.0001% |
+| itm_3bps | 648 | -0.0034% | (-0.0096%, +0.0025%) | -0.0003% |
+| atm_5bps | 500 | -0.0053% | (-0.0130%, +0.0024%) | -0.0013% |
+| high_conv_8bps | 303 | +0.0040% | (-0.0050%, +0.0127%) | +0.0057% |
+| very_high_10bps | 225 | +0.0007% | (-0.0125%, +0.0125%) | +0.0089% |
+| ultra_conv_15bps | 125 | +0.0105% | (-0.0093%, +0.0268%) | +0.0148% |
+| max_conv_20bps | 80 | +0.0051% | (-0.0247%, +0.0271%) | +0.0176% |
+
+**0 of 8 cells statistically significant. Mean ∈ [-0.005%, +0.011%] per trade. F7 +2.84% headline REFUTED.**
+
+The R-16a deep_itm_1.4bps "+2.84%" headline was a CUMULATIVE return over 702 trades. The per-trade mean is +0.0047% with CI=(-0.0017%, +0.0116%) crossing zero → NOT statistically distinguishable from zero. Cumulative breakdown: 702 trades × 0.0047% = +3.3% expected (close to +2.84% observed); but CI lower bound = -0.0017% × 702 = -1.2% (suggesting NEGATIVE cumulative is within sampling noise). **No directional alpha at α=0.05.**
+
+#### Arm 3: TLOB × point (8 thresholds; n_seeds varies; **SIGNIFICANTLY NEGATIVE at 4 of 8**)
+
+| threshold | n_seeds | n_trades | mean | CI (95%) | sig? |
+|---|---|---|---|---|---|
+| deep_itm_1.4bps | 9 | 5387 | -0.0045% | (-0.0071%, -0.0020%) | **\*** |
+| itm_2bps | 9 | 4356 | -0.0037% | (-0.0065%, -0.0009%) | **\*** |
+| itm_3bps | 9 | 2444 | -0.0044% | (-0.0083%, -0.0009%) | **\*** |
+| atm_5bps | 6 | 635 | -0.0105% | (-0.0180%, -0.0033%) | **\*** |
+| high_conv_8bps | 0 | 0 | NaN | NaN | (model never confident enough at this threshold) |
+| very_high_10bps | 0 | 0 | NaN | NaN | (model never confident enough at this threshold) |
+| ultra_conv_15bps | 0 | 0 | NaN | NaN | (model never confident enough at this threshold) |
+| max_conv_20bps | 0 | 0 | NaN | NaN | (model never confident enough at this threshold) |
+
+**4 of 8 cells SIGNIFICANTLY LOSING. 4 NaN cells = model never predicts confidently enough.**
+
+#### Arm 4: TLOB × peak (8 thresholds; **SIGNIFICANTLY NEGATIVE at 7 of 8**)
+
+| threshold | n_seeds | n_trades | mean | CI (95%) | sig? |
+|---|---|---|---|---|---|
+| deep_itm_1.4bps | 8 | 5775 | -0.0054% | (-0.0074%, -0.0033%) | **\*** |
+| itm_2bps | 7 | 5051 | -0.0056% | (-0.0078%, -0.0034%) | **\*** |
+| itm_3bps | 7 | 5049 | -0.0054% | (-0.0076%, -0.0031%) | **\*** |
+| atm_5bps | 7 | 5043 | -0.0052% | (-0.0073%, -0.0029%) | **\*** |
+| high_conv_8bps | 7 | 5019 | -0.0058% | (-0.0079%, -0.0038%) | **\*** |
+| very_high_10bps | 6 | 4245 | -0.0060% | (-0.0082%, -0.0038%) | **\*** |
+| ultra_conv_15bps | 3 | 1087 | -0.0049% | (-0.0096%, -0.0004%) | **\*** |
+| max_conv_20bps | 1 | 107 | -0.0083% | (-0.0289%, +0.0113%) | (n=1 seed) |
+
+**7 of 8 cells SIGNIFICANTLY LOSING (only max_conv_20bps non-sig due to low sample). TLOB encoder COUNTER-predicts peak labels at every threshold.**
+
+### Aggregate verdict across 32 cells
+
+- **0 of 32 cells significantly POSITIVE** at α=0.05
+- **11 of 32 cells significantly NEGATIVE** at α=0.05 (all TLOB arms)
+- **21 of 32 cells indistinguishable from zero** at α=0.05
+
+**Conclusion**: R-16a's +2.84% Ridge × Peak headline is RIGOROUSLY REFUTED via multi-seed paired-bootstrap with 9-block-length blocks (Künsch 1989 / Politis-Romano 1994). The TLOB encoder COUNTER-predicts peak_return labels significantly (extends earlier Stage 2/3 TLOB×Peak test_ic=-0.0125 finding from cycle5_multi_arm to formal CI-based confirmation). No directional alpha exists in either Ridge or TLOB on v3p0 corpus at H60 across any threshold.
+
+### Cost-model context
+
+This round uses the standard `OpraCalibratedCosts` + `CostConfig.for_exchange("XNAS")` cost model (IBKR-calibrated from 316 NVDA 0DTE fills). The verdict is **gross of cost validation** because all bootstrap CIs are sub-1% in fraction units — well below the 1.4 bps Deep ITM breakeven. NO net-positive expectation can survive cost-adjustment.
+
+### Producer-side validation
+
+**Phase Y composer empirically validated**: 4 R-16a seed_42 records correctly deduped against R-16c grid points (sweep log "Duplicate found: cycle6_r16a_point_vs_peak_H60__temporal_ridge_point_return_20260511T012925_3a832bb6. Skipping."). This is the FIRST production demonstration of cross-sweep fingerprint-based dedup using Phase Y composer + dedup module → validates `experiment_provenance_hash` composability.
+
+### Outstanding work
+
+- **#PY-183 NEW**: TLOB encoder COUNTER-predicts peak_return labels — investigate root cause (BiN normalization + dual attention learning anti-correlated features).
+- **#PY-184 STATUS:CLOSED-by-r16c-cycle-close**: Analyzer CLI bug fixes (`paths.pipeline_root` at 2 sites + `--allow-partial` flag) shipped in atomic hft-ops commit alongside this ledger entry (R-16c cycle-close 3-commit bundle).

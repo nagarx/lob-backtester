@@ -18,8 +18,17 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
+
+# R-16c F1 (2026-05-12): persist per-trade option P&L array for downstream
+# pooled-bootstrap statistical analysis per X2 pre-impl design gate. Uses
+# hft_contracts.atomic_io.atomic_write_npy SSoT (Class A per CLAUDE.md) to
+# match the atomic-write discipline shipped in #PY-73 closure (2026-05-11).
+# Placed with third-party imports (above sys.path.insert) since hft_contracts
+# is a pip-installed sibling package, NOT a path-shim'd local sibling.
+from hft_contracts.atomic_io import atomic_write_npy
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -36,9 +45,18 @@ from lobbacktest.metrics import (
 
 def run_one_backtest(
     data, prices, config, strategy_config, holding_policy,
-    zero_dte_config, label, verbose=True,
+    zero_dte_config, label, verbose=True, output_dir: Optional[Path] = None,
+    run_name: Optional[str] = None,
 ):
-    """Run a single backtest with given strategy config and return results."""
+    """Run a single backtest with given strategy config and return results.
+
+    Phase R-16c F1 (2026-05-12): when ``output_dir`` + ``run_name`` are supplied
+    AND ``zero_dte_config.enabled`` AND ``option_result.n_trades > 0``, persists
+    the per-trade ``option_trade_pnls`` array atomically to
+    ``output_dir / f"{run_name}__option_trade_pnls__{label}.npy"`` for downstream
+    pooled-bootstrap statistical analysis. Backwards-compatible: omitting
+    ``output_dir``/``run_name`` preserves pre-R-16c behavior (no .npy emission).
+    """
     strategy = RegressionStrategy(
         predicted_returns=data.predicted_returns,
         spreads=data.spreads,
@@ -108,6 +126,18 @@ def run_one_backtest(
         if option_result.n_trades > 0:
             summary["option_win_rate"] = round(option_result.option_win_rate, 4)
             summary["option_avg_pnl"] = round(float(option_result.option_trade_pnls.mean()), 4)
+
+            # Phase R-16c F1 (2026-05-12): atomic dump of per-trade option pnls.
+            # Required for R-16c pooled-per-trade bootstrap CI (X2 pre-registered
+            # analysis primitive). Backwards-compatible: only fires when caller
+            # supplies output_dir + run_name. Truthy `run_name` guard rejects
+            # empty string per pre-commit code-reviewer MICRO-FIX 2 (would
+            # produce filenames with double-underscore prefix on empty string).
+            # Filename convention parallel to `output_dir / f"{run_name}.json"`.
+            if output_dir is not None and run_name:
+                pnls_path = output_dir / f"{run_name}__option_trade_pnls__{label}.npy"
+                atomic_write_npy(pnls_path, option_result.option_trade_pnls)
+                summary["option_trade_pnls_path"] = pnls_path.name
         if verbose:
             print(f"  --- 0DTE Option P&L ---")
             print(f"  Final equity: ${option_result.option_final_equity:,.2f}")
@@ -253,6 +283,14 @@ def main():
         ("max_conv_20bps", 20.0),
     ]
 
+    # Phase R-16c F1 (2026-05-12): set up output_dir BEFORE the per-threshold
+    # loop so each iteration can dump option_trade_pnls.npy atomically.
+    # Previously output_dir.mkdir() ran AFTER the loop (line ~270), which
+    # meant the dump couldn't happen inside run_one_backtest. Lifting this
+    # 3-line block ~12 lines earlier is idempotent + safe.
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     all_results = []
     for label, min_ret in thresholds:
         strategy_config = RegressionStrategyConfig(
@@ -264,11 +302,9 @@ def main():
         result = run_one_backtest(
             data, data.prices, config, strategy_config, holding_policy,
             zero_dte_config, label,
+            output_dir=output_dir, run_name=args.name,
         )
         all_results.append(result)
-
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\n{'=' * 90}")
     print(f"  SUMMARY: {args.name}")

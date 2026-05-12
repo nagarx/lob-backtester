@@ -804,3 +804,94 @@ WinRate=0 across all thresholds is the known **F-6 backtester display issue** (C
 3. **Phase C.1 truth-pin**: loading R9's pre-Phase-C.1 checkpoint emits `CheckpointConfigMismatchWarning` showing horizons drift `(10, 60, 300)` (post-truth-pin, correct) vs `(10, 20, 50, 100, 200)` (R9's pre-truth-pin, WRONG — classification defaults from silent-fallback at compatibility.py:233 that Phase C.1 deleted). Empirically observed in production code path. **Implication**: R9-R14 stored compatibility_fingerprints reflect WRONG horizons. See PHASE_P_BACKLOG.md `#PY-6`.
 
 R15 wall-clock: ~5s export + ~2 min backtest = ~2 min total. Zero training compute. Validated entire Phase Y producer chain at minimum cost — pattern for future Phase Y producer-side iteration documented.
+
+---
+
+## Round 16a — Multi-Arm Sweep (point vs peak × Ridge vs TLOB × H60, 2026-05-11)
+
+**Backfilled 2026-05-13** per hft-rules §13 same-session ledger mandate (closes §13 violation; backtests ran 2026-05-11 but ledger entry overdue 2 days; backfill source: 4 backtest records at `hft-ops/experiments/ledger/runs/cycle6_r16a_*_backtest_*.json` all `status: completed`). See `lob-model-trainer/EXPERIMENT_INDEX.md` "R-16a Cycle 6" entry for upstream context + cycle topology.
+
+**Sweep config**: 2×2 grid (model_type × return_type), 1 seed per arm = 4 records. Manifest: `hft-ops/experiments/sweeps/cycle6_r16a_point_vs_peak_H60.yaml`. v3p0 baseline corpus (e5_timebased_60s_v3p0, 233 days NVDA XNAS, test split 8085 samples per arm).
+
+### Headline (best per arm + framing)
+
+| Arm | Best Threshold | Best OptRet | Win Rate | Sharpe | n_entries | Mean OptRet (8 thresh) |
+|---|---|---|---|---|---|---|
+| Ridge × Peak | deep_itm_1.4bps | **+2.84%** | 50.43% | -7.40 | 702 | **-0.34%** (cherry-pick) |
+| Ridge × Point | atm_5bps | +0.98% | 51.53% | -6.48 | 326 | -0.18% |
+| TLOB × Peak | deep_itm_1.4bps | +0.22% | 43.08% | -2.86 | 65 | +0.03% (sparse) |
+| TLOB × Point | itm_2bps | +0.08% | 49.87% | -9.11 | 393 | -0.11% |
+
+**CRITICAL FRAMING** (see Phase R-17 v2 16-agent audit 2026-05-11; reframed from "MAJOR EMPIRICAL FINDING" → "PRELIMINARY OUTLIER-DRIVEN OPTION-CONVEXITY ARTIFACT"):
+- Ridge × Peak's +2.84% headline is **NOT validated alpha**. Rigorous p ≈ 0.74 (Wave 3 16-agent re-derivation). Mean across 8 thresholds is **NEGATIVE** (-0.34%).
+- Win rate 50.43% indistinguishable from coin-flip (z=0.23) → no directional edge.
+- Top 7 trades = 123.2% of return (outlier-driven; not 5-σ NVDA April 8-9 since those are TRAIN-split for R-16a).
+- `peak_return` label has forward-leaking semantics `[k+1:k+h+1]` — INTENDED for trading per Wave 3 Agent D, but explains why peak > point P&L is plausible (model captures asymmetric magnitudes from gamma capture, not directional alpha).
+- `best_total_return` (share-equivalent on -$187 negative position) for Ridge × Peak: -1.87% NEGATIVE. The +2.84% is OPTION CONVEXITY of asymmetric magnitudes from forward-leaking label, NOT alpha.
+
+### Ridge × Peak — full 8-threshold sweep
+
+| threshold | n_entries | win_rate | option_return_pct | total_return |
+|---|---|---|---|---|
+| deep_itm_1.4bps | 702 | 0.5043 | **+2.84%** | -0.0187 |
+| itm_2bps | 686 | 0.4810 | -2.55% | -0.0478 |
+| itm_3bps | 649 | 0.4823 | -2.67% | -0.0464 |
+| atm_5bps | 501 | 0.4870 | -2.82% | -0.0406 |
+| high_conv_8bps | 305 | 0.5246 | +0.90% | -0.0100 |
+| very_high_10bps | 226 | 0.5531 | -0.09% | -0.0117 |
+| ultra_conv_15bps | 127 | 0.6142 | +1.40% | +0.0014 |
+| max_conv_20bps | 81 | 0.6173 | +0.24% | -0.0029 |
+
+### Ridge × Point — full 8-threshold sweep
+
+| threshold | n_entries | win_rate | option_return_pct | total_return |
+|---|---|---|---|---|
+| deep_itm_1.4bps | 641 | 0.5008 | +0.43% | -0.0279 |
+| itm_2bps | 582 | 0.5223 | -0.86% | -0.0326 |
+| itm_3bps | 475 | 0.5095 | -1.23% | -0.0298 |
+| atm_5bps | 326 | 0.5153 | **+0.98%** | -0.0102 |
+| high_conv_8bps | 194 | 0.5361 | -0.07% | -0.0099 |
+| very_high_10bps | 150 | 0.5600 | -0.27% | -0.0089 |
+| ultra_conv_15bps | 77 | 0.5584 | +0.22% | -0.0027 |
+| max_conv_20bps | 44 | 0.5455 | -0.64% | -0.0061 |
+
+### TLOB × Peak — sparse (n_entries=0 at most thresholds)
+
+| threshold | n_entries | win_rate | option_return_pct | total_return |
+|---|---|---|---|---|
+| deep_itm_1.4bps | 65 | 0.4308 | **+0.22%** | -0.0018 |
+| itm_2bps - max_conv_20bps | 0 | (no trades) | +0.00% | +0.0000 |
+
+Predictions too sparse at higher thresholds — TLOB × peak counter-predicts (test_ic = -0.0125 per banner; not persisted in training_record.json due to #PY-182).
+
+### TLOB × Point — sparse (only 2 thresholds have trades)
+
+| threshold | n_entries | win_rate | option_return_pct | total_return |
+|---|---|---|---|---|
+| deep_itm_1.4bps | 546 | 0.4542 | -0.97% | -0.0313 |
+| itm_2bps | 393 | 0.4987 | **+0.08%** | -0.0185 |
+| itm_3bps - max_conv_20bps | 0 | (no trades) | +0.00% | +0.0000 |
+
+### Phase Y composability validation R-16a
+
+| Arm | experiment_provenance_hash | compatibility_fingerprint |
+|---|---|---|
+| Ridge × Point | `901c25dd1eb0f8a5...` | `44d3a00a883ef869...` |
+| Ridge × Peak | `9d86357a642b4ed9...` | `7ef24c63788b0532...` |
+| TLOB × Point | `a1fdaaf362c3ba60...` | `44d3a00a883ef869...` |
+| TLOB × Peak | `22c8834b8768c14c...` | `7ef24c63788b0532...` |
+
+4 distinct experiment_provenance_hash + 2 distinct compatibility_fingerprint (return_type axis correctly discriminates compat_fp). Cross-cycle: Ridge × Point compat_fp matches cycle5_multi_arm 2026-05-10 baseline (same data axis), confirming Phase C.1 truth-pin holds across cycles.
+
+### Sub-cycle 4b smoke-test reproduction (R-16a Ridge×Peak deep_itm_1.4bps)
+
+19 per-trade `option_trade_pnls.npy` fixtures emitted via `de99f45` producer-side dump (Sub-cycle 4a) on 2026-05-12; analyzer cell verdict = **REFUTE ✓** via H1(b) bootstrap CI binding constraint (CI crosses zero). #PY-180 STATUS:CLOSED 2026-05-13 (hft-ops `fa90238`) refined CI rendering — post-fix CI bounds in fraction units are sub-1% (was misrendered as ±100s% pre-fix per DOLLAR×100 bug).
+
+### Round 16a — Cost Model Caveat
+
+This round uses the standard `OpraCalibratedCosts` + `CostConfig.for_exchange("XNAS")` cost model. The +2.84% Ridge × Peak OptRet is GROSS of cycle-specific cost validation. Sub-cycle 4b empirical analysis using bootstrap CI on per-trade pnls (post-#PY-180 fix) refutes the headline via H1(b) sign-zero-crossing — NOT a cost-model issue.
+
+### Outstanding work
+
+- **#PY-182 NEW**: investigate training_record.status:failed + test_metrics:None across 4 R-16a training records. Banner-cited test_ic values came from in-process state not persisted to JSON.
+- **R-16c sweep launch**: cycle7_r16c_multi_seed_r16a.yaml is LAUNCH-READY (40 grid × 10 seeds; ~80 min compute). Multi-seed power analysis on Ridge × Peak +2.84% will confirm/refute outlier-driven artifact framing via H1 three-conjunctive + H4 negative-control + H5 architectural invariant.

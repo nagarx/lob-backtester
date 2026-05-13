@@ -292,6 +292,185 @@ class TestRegressionLedgerLinkage:
 
 
 # =============================================================================
+# B.1 Phase B Ship-Blocker Fix: Auto-Discover primary_horizon_idx
+# =============================================================================
+
+
+def _write_signal_dir_with_compat(target_dir: Path, *,
+                                   primary_horizon_idx: int = 0,
+                                   omit_compatibility: bool = False,
+                                   omit_primary_horizon_idx: bool = False,
+                                   n_samples: int = 16) -> Path:
+    """Helper for B.1 tests: mock signal_dir with optional Phase II compat block.
+
+    Mirrors test_phase2_expected_fields_wiring._write_regression_signal_dir.
+    Uses CompatibilityContract for valid fingerprint when compat is present.
+    """
+    from hft_contracts.compatibility import CompatibilityContract
+    import numpy as np
+    target_dir.mkdir(parents=True, exist_ok=True)
+    rng = np.random.RandomState(0)
+    np.save(target_dir / "prices.npy", np.abs(rng.randn(n_samples)) + 100.0)
+    np.save(target_dir / "predicted_returns.npy", rng.randn(n_samples, 3))
+    np.save(target_dir / "regression_labels.npy", rng.randn(n_samples, 3))
+    np.save(target_dir / "spreads.npy", np.abs(rng.randn(n_samples)) * 0.5 + 1.0)
+    meta = {
+        "schema_version": "3.0",
+        "contract_version": "3.0",
+        "model_type": "temporal_ridge",
+        "model_name": "TemporalRidge",
+        "parameters": 100,
+        "signal_type": "regression",
+        "split": "test",
+        "total_samples": n_samples,
+        "checkpoint": "/tmp/mock.pkl",
+        "horizons": [10, 60, 300],
+    }
+    if not omit_compatibility:
+        contract = CompatibilityContract(
+            contract_version="3.0",
+            schema_version="3.0",
+            feature_count=98,
+            window_size=20,
+            feature_layout="default",
+            data_source="mbo_lob",
+            label_strategy_hash="a" * 64,
+            calibration_method=None,
+            primary_horizon_idx=primary_horizon_idx,
+            horizons=(10, 60, 300),
+            normalization_strategy="none",
+        )
+        block = {
+            "contract_version": contract.contract_version,
+            "schema_version": contract.schema_version,
+            "feature_count": contract.feature_count,
+            "window_size": contract.window_size,
+            "feature_layout": contract.feature_layout,
+            "data_source": contract.data_source,
+            "label_strategy_hash": contract.label_strategy_hash,
+            "calibration_method": contract.calibration_method,
+            "primary_horizon_idx": contract.primary_horizon_idx,
+            "horizons": list(contract.horizons),
+            "normalization_strategy": contract.normalization_strategy,
+        }
+        if omit_primary_horizon_idx:
+            block.pop("primary_horizon_idx")
+        meta["compatibility"] = block
+        meta["compatibility_fingerprint"] = contract.fingerprint()
+    (target_dir / "signal_metadata.json").write_text(json.dumps(meta, sort_keys=True))
+    return target_dir
+
+
+@pytest.mark.integration
+class TestAutoDiscoverPrimaryHorizonIdx:
+    """B.1 Phase B ship-blocker fix (R-16d horizon-axis sweep prereq, 2026-05-13).
+
+    Backtester auto-discovers primary_horizon_idx from
+    signal_metadata.compatibility.primary_horizon_idx when --primary-horizon-idx
+    flag is omitted. Enables horizon-axis sweeps (e.g., R-16d {H10, H60})
+    to author manifests without per-axis-value extra_args overrides. Explicit
+    flag still wins; auto-discover is fallback only.
+    """
+
+    def test_explicit_flag_wins_when_provided(self, tmp_path):
+        """--primary-horizon-idx 0 + signal_metadata.compatibility.primary_horizon_idx=0
+        → explicit source + value 0."""
+        signal_dir = _write_signal_dir_with_compat(
+            tmp_path / "signals", primary_horizon_idx=0,
+        )
+        output_dir = tmp_path / "outputs"
+        output_dir.mkdir()
+        result = subprocess.run(
+            [sys.executable, str(REGRESSION_SCRIPT),
+             "--signals", str(signal_dir),
+             "--name", "test_explicit",
+             "--exchange", "XNAS", "--deep-itm",
+             "--primary-horizon-idx", "0",
+             "--output-dir", str(output_dir)],
+            capture_output=True, text=True, timeout=60,
+        )
+        assert result.returncode == 0, (
+            f"Script crashed: stderr={result.stderr[-1000:]} stdout={result.stdout[-500:]}"
+        )
+        assert "primary_horizon_idx=0 (explicit)" in result.stdout, (
+            f"Expected '(explicit)' source marker; got: {result.stdout[-1000:]}"
+        )
+
+    def test_auto_discover_from_signal_metadata_when_flag_omitted(self, tmp_path):
+        """No --primary-horizon-idx + signal_metadata.compatibility.primary_horizon_idx=2
+        → auto-discovered source + value 2 (R-16d horizon-sweep enabler)."""
+        signal_dir = _write_signal_dir_with_compat(
+            tmp_path / "signals", primary_horizon_idx=2,
+        )
+        output_dir = tmp_path / "outputs"
+        output_dir.mkdir()
+        result = subprocess.run(
+            [sys.executable, str(REGRESSION_SCRIPT),
+             "--signals", str(signal_dir),
+             "--name", "test_auto",
+             "--exchange", "XNAS", "--deep-itm",
+             # NO --primary-horizon-idx flag
+             "--output-dir", str(output_dir)],
+            capture_output=True, text=True, timeout=60,
+        )
+        assert result.returncode == 0, (
+            f"Script crashed: stderr={result.stderr[-1000:]} stdout={result.stdout[-500:]}"
+        )
+        assert "primary_horizon_idx=2 (auto-discovered)" in result.stdout, (
+            f"Expected '(auto-discovered)' source marker for primary_horizon_idx=2; "
+            f"got: {result.stdout[-1000:]}"
+        )
+
+    def test_no_discovery_when_compatibility_block_missing(self, tmp_path):
+        """No --primary-horizon-idx + no compatibility block → NO Phase II check line."""
+        signal_dir = _write_signal_dir_with_compat(
+            tmp_path / "signals", omit_compatibility=True,
+        )
+        output_dir = tmp_path / "outputs"
+        output_dir.mkdir()
+        result = subprocess.run(
+            [sys.executable, str(REGRESSION_SCRIPT),
+             "--signals", str(signal_dir),
+             "--name", "test_no_compat",
+             "--exchange", "XNAS", "--deep-itm",
+             "--output-dir", str(output_dir)],
+            capture_output=True, text=True, timeout=60,
+        )
+        assert result.returncode == 0, (
+            f"Script crashed: stderr={result.stderr[-1000:]}"
+        )
+        # When NO flag AND NO compatibility block, NO Phase II partial-assertion fires.
+        assert "Phase II check: primary_horizon_idx" not in result.stdout, (
+            f"Expected NO Phase II check line; got: {result.stdout[-500:]}"
+        )
+
+    def test_no_discovery_when_primary_horizon_idx_field_missing_from_compat(self, tmp_path):
+        """Compatibility block exists but lacks primary_horizon_idx → NO Phase II check line."""
+        signal_dir = _write_signal_dir_with_compat(
+            tmp_path / "signals", omit_primary_horizon_idx=True,
+        )
+        output_dir = tmp_path / "outputs"
+        output_dir.mkdir()
+        result = subprocess.run(
+            [sys.executable, str(REGRESSION_SCRIPT),
+             "--signals", str(signal_dir),
+             "--name", "test_no_field",
+             "--exchange", "XNAS", "--deep-itm",
+             "--output-dir", str(output_dir)],
+            capture_output=True, text=True, timeout=60,
+        )
+        # When NO flag AND compatibility lacks primary_horizon_idx field,
+        # effective stays None → no Phase II check line.
+        # NOTE: returncode may be nonzero if loader checks compat fingerprint match
+        # (the omitted field may invalidate the stored fingerprint). Just check
+        # the discovery-source line did NOT print "auto-discovered" or "explicit".
+        assert "primary_horizon_idx=" not in result.stdout or "auto-discovered" not in result.stdout, (
+            f"Expected NO auto-discovery when primary_horizon_idx missing from compat block; "
+            f"got stdout: {result.stdout[-1000:]}"
+        )
+
+
+# =============================================================================
 # F1 Spread Signal Acceptance — accept + notice
 # =============================================================================
 

@@ -220,9 +220,27 @@ def main():
         m = signal_metadata.get("metrics", {})
         print(f"  Model R²={m.get('r2', '?')}, IC={m.get('ic', '?')}")
 
+    # Phase B Step 1 ship-blocker fix (R-16d horizon-axis sweep prereq, 2026-05-13):
+    # Auto-discover primary_horizon_idx from signal_metadata.compatibility when
+    # --primary-horizon-idx flag was NOT explicitly provided. Enables horizon-axis
+    # sweeps (e.g., R-16d {H10, H60}) to author manifests without per-axis-value
+    # extra_args overrides (an hft-ops manifest schema limitation). Each grid
+    # point's signal_metadata.json already carries the correct primary_horizon_idx
+    # from the trainer's signal_export step. Explicit flag still wins; auto-discover
+    # is fallback only — preserves backward-compat with R9-R14 + R-16a + R-16c
+    # invocations that pass the flag explicitly.
+    effective_primary_horizon_idx = args.primary_horizon_idx
+    discovery_source = "explicit"
+    if effective_primary_horizon_idx is None:
+        compat = signal_metadata.get("compatibility") or {}
+        discovered = compat.get("primary_horizon_idx")
+        if discovered is not None:
+            effective_primary_horizon_idx = int(discovered)
+            discovery_source = "auto-discovered"
+
     expected_fields = (
-        {"primary_horizon_idx": args.primary_horizon_idx}
-        if args.primary_horizon_idx is not None
+        {"primary_horizon_idx": effective_primary_horizon_idx}
+        if effective_primary_horizon_idx is not None
         else None
     )
     data = BacktestData.from_signal_dir(
@@ -230,7 +248,10 @@ def main():
         expected_fields=expected_fields,
     )
     if expected_fields is not None:
-        print(f"  Phase II check: primary_horizon_idx={args.primary_horizon_idx} ✓")
+        print(
+            f"  Phase II check: primary_horizon_idx={effective_primary_horizon_idx} "
+            f"({discovery_source}) ✓"
+        )
     n = len(data)
     print(f"  Loaded {n:,} samples")
 

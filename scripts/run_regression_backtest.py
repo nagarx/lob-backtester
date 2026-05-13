@@ -314,10 +314,24 @@ def main():
 
     all_results = []
     for label, min_ret in thresholds:
+        # #PY-189 closure (2026-05-13): propagate auto-discovered primary_horizon_idx
+        # (computed at L232-239 from signal_metadata.compatibility) into the
+        # RegressionStrategyConfig used by RegressionStrategy.__init__ at
+        # `lobbacktest/strategies/regression.py:80-83`. Pre-fix: hardcoded 0 was
+        # dead code on the 1-D `predicted_returns.npy` consumed path (strategy
+        # only slices when ndim==2), but LATENT for any future 2-D export (e.g.,
+        # R-16d horizon-axis sweep emitting `(N, H)`). Closing the latent silent
+        # bug per hft-rules §5 fail-loud: if 2-D export ever lands, the strategy
+        # slices the column auto-discovered from signal_metadata rather than
+        # silently defaulting to H10.
         strategy_config = RegressionStrategyConfig(
             min_return_bps=min_ret,
             max_spread_bps=args.max_spread_bps,
-            primary_horizon_idx=0,
+            primary_horizon_idx=(
+                effective_primary_horizon_idx
+                if effective_primary_horizon_idx is not None
+                else 0
+            ),
             cooldown_events=0,
         )
         result = run_one_backtest(

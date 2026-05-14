@@ -1,6 +1,6 @@
 # LOB-Backtester: Codebase Technical Reference
 
-> **Version**: 0.1.0 | **Tests**: 428 (412 passed + 16 skipped) | **Last Updated**: 2026-05-14 (Cluster D.1+E — FIND-001/002/003/040 + Lesson #14 closures)  
+> **Version**: 0.1.0 | **Tests**: 457 (441 passed + 16 skipped) | **Last Updated**: 2026-05-14 (Cluster H + #PY-228+FIND-067 — FIND-110 np.load security sweep + Dict[str, Any] type discipline + dead `ComparisonConfig` deletion)  
 > **Purpose**: Complete technical details for LLMs and developers to understand, modify, and extend the codebase without prior context.
 
 ## State at HEAD (cumulative through Phase 7 Round 5)

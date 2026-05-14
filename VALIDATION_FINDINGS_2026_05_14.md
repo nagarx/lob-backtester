@@ -2095,7 +2095,14 @@ The 17-round empirical backtest history (R1-R17a) has encoded the following less
 | 27 | `BacktestStats.daily()` / `.monthly()` raise `NotImplementedError` until `BacktestResult.timestamps_ns` lands; `.full()` is no-op self-return | **ENFORCED** | `stats/stats.py:113-143` (FIND-040 lock; verified by `tests/test_stats/test_stats.py::TestPeriodAggregationStubs`) |
 | 28 | `tests/test_strategies/test_twap.py` carries `pytestmark = pytest.mark.skip(reason="...C2 incompatibility...")` at module scope (replaces stale Lesson #14 "DOC-DISAGREES-WITH-CODE") | **ENFORCED** | `tests/test_strategies/test_twap.py:33-40` (Lesson #14 closure lock; verified by `tests/test_strategies/test_twap_skip_discipline.py::TestTwapSkipDiscipline::test_twap_module_has_pytestmark_skip`) |
 
-**Refactor invariants**: any redesign MUST preserve lessons 1–28 (or explicitly justify breaking them with a new pre-registered experimental finding).
+**Additional encoded lessons added by Cluster H + #PY-228+FIND-067 (2 NEW, 2026-05-14)** — shipped as Commit 1 (FIND-110 security sweep) + Commit 2 (#PY-228 type discipline + FIND-067 ComparisonConfig deletion):
+
+| # | Lesson | Status | File:Line |
+|---|---|---|---|
+| 29 | Every `np.load(...)` callsite in `src/`, `tests/`, `scripts/` MUST pass `allow_pickle=False` — defends against pickle-RCE via malicious `.npy` files (hft-rules §8) | **ENFORCED** | All 25 callsites (FIND-110 lock; verified by `tests/test_security/test_np_load_allow_pickle_false.py::TestFind110AllowPickleFalseLock::test_every_np_load_passes_allow_pickle_false` AST/regex walk) |
+| 30 | No `Dict[str, any]` (lowercase `any`) type annotations in `src/`, `tests/`, `scripts/` — `any` is a built-in callable, not a type marker; use `typing.Any` (uppercase) | **ENFORCED** | 5 production sites fixed (`config.py:225, 387, 425` + `types.py:211, 326`); dead `ComparisonConfig` sister deleted (FIND-067 closure); verified by `tests/test_type_annotation_discipline.py::TestPy228TypeAnnotationDisciplineLock::test_no_lowercase_any_in_dict_annotations` AST-walk. Scope gap: PEP 585 lowercase `dict[str, any]` NOT caught (codebase uses uppercase `Dict`; Cluster F.2 Pydantic migration sweeps holistically). |
+
+**Refactor invariants**: any redesign MUST preserve lessons 1–30 (or explicitly justify breaking them with a new pre-registered experimental finding).
 
 ---
 
@@ -2105,7 +2112,7 @@ The 17-round empirical backtest history (R1-R17a) has encoded the following less
 |---|---|---|---|
 | `BacktestStats.daily()/monthly()/full()` (period stubs) | CERTAIN | `stats/stats.py:106-134` | FIND-040 |
 | `BacktestStats._get_trade_pnls` (trivial wrapper) | HIGH | `stats/stats.py:209-211` | |
-| `ComparisonConfig` (entire class) | CERTAIN | `config.py:457-468` | FIND-067 |
+| ~~`ComparisonConfig` (entire class)~~ DELETED 2026-05-14 | — | (was `config.py:493-504` in HEAD `f8f455f`) | FIND-067 STATUS:CLOSED |
 | `BacktestConfig.min_confidence`, `min_agreement` | CONFIRMED-CRITICAL (not just dead — FIND-070) | `config.py:312-313` | FIND-056 + FIND-070 |
 | `BacktestConfig.stop_loss_pct, take_profit_pct, fill_price, target_holding_minutes` | CERTAIN | `config.py:288-309, 262` | FIND-058 |
 | `ZeroDteConfig.entry_window_*_et, target_holding_minutes` | CERTAIN | `config.py:262, 265-266` | FIND-059, FIND-060 |

@@ -95,8 +95,8 @@ def load_single_day_data(
     if not seq_path.exists():
         raise FileNotFoundError(f"Sequences file not found: {seq_path}")
     
-    sequences = np.load(seq_path)
-    labels_raw = np.load(label_path)
+    sequences = np.load(seq_path, allow_pickle=False)
+    labels_raw = np.load(label_path, allow_pickle=False)
     
     with open(meta_path) as f:
         metadata = json.load(f)

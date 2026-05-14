@@ -97,8 +97,8 @@ def load_model_and_data(
     all_labels = []
     
     for seq_file, label_file in zip(seq_files, label_files):
-        sequences = np.load(seq_file)
-        labels = np.load(label_file)
+        sequences = np.load(seq_file, allow_pickle=False)
+        labels = np.load(label_file, allow_pickle=False)
         all_sequences.append(sequences)
         all_labels.append(labels)
     

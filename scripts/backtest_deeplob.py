@@ -81,8 +81,8 @@ def load_test_data(data_dir: Path, horizon_idx: int = 0) -> Dict[str, dict]:
 
     data_by_day = {}
     for day in days:
-        seq = np.load(test_dir / f"{day}_sequences.npy")
-        labels_raw = np.load(test_dir / f"{day}_labels.npy")
+        seq = np.load(test_dir / f"{day}_sequences.npy", allow_pickle=False)
+        labels_raw = np.load(test_dir / f"{day}_labels.npy", allow_pickle=False)
         
         with open(test_dir / f"{day}_normalization.json") as f:
             norm = json.load(f)

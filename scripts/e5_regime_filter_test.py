@@ -74,7 +74,7 @@ def create_regime_mask(
     mask_parts = []
 
     for sf in seq_files:
-        seqs = np.load(sf, mmap_mode="r")
+        seqs = np.load(sf, mmap_mode="r", allow_pickle=False)
         n_day = seqs.shape[0]
 
         day_mask = np.zeros(n_day, dtype=bool)
@@ -118,7 +118,7 @@ def filter_and_save_signals(
     for fname in signal_files:
         fpath = signal_dir / fname
         if fpath.exists():
-            arr = np.load(fpath)
+            arr = np.load(fpath, allow_pickle=False)
             filtered = arr[mask]
             np.save(output_dir / fname, filtered)
             stats[fname] = {"original": len(arr), "filtered": len(filtered)}
@@ -148,7 +148,7 @@ def main():
     output_base = Path(args.output_dir)
 
     # Load signal count
-    pred = np.load(signal_dir / "predicted_returns.npy")
+    pred = np.load(signal_dir / "predicted_returns.npy", allow_pickle=False)
     n_signals = len(pred)
     print(f"Total signals: {n_signals}")
 

@@ -187,7 +187,7 @@ class DataLoader:
         for seq_file in seq_files:
             date = seq_file.stem.replace("_sequences", "")
 
-            sequences = np.load(seq_file)
+            sequences = np.load(seq_file, allow_pickle=False)
 
             label_file = split_dir / f"{date}_labels.npy"
             if not label_file.exists():
@@ -195,7 +195,7 @@ class DataLoader:
                     f"Missing labels for {date}: {label_file}. "
                     "Backtester requires labels for performance evaluation."
                 )
-            labels = np.load(label_file)
+            labels = np.load(label_file, allow_pickle=False)
 
             if sequences.shape[0] != labels.shape[0]:
                 raise ContractError(
@@ -281,7 +281,7 @@ class DataLoader:
         if not seq_file.exists():
             raise FileNotFoundError(f"Sequence file not found: {seq_file}")
 
-        sequences = np.load(seq_file)
+        sequences = np.load(seq_file, allow_pickle=False)
 
         label_file = split_dir / f"{date}_labels.npy"
         if not label_file.exists():
@@ -289,7 +289,7 @@ class DataLoader:
                 f"Missing labels for {date}: {label_file}. "
                 "Backtester requires labels for performance evaluation."
             )
-        labels = np.load(label_file)
+        labels = np.load(label_file, allow_pickle=False)
 
         if sequences.shape[0] != labels.shape[0]:
             raise ContractError(

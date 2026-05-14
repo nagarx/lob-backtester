@@ -160,12 +160,12 @@ class BacktestData:
             for w in warnings:
                 print(f"  ⚠️  Signal validation: {w}")
 
-        prices = np.load(d / "prices.npy")
-        labels = np.load(d / "labels.npy") if (d / "labels.npy").exists() else None
-        predictions = np.load(d / "predictions.npy") if (d / "predictions.npy").exists() else None
-        spreads = np.load(d / "spreads.npy") if (d / "spreads.npy").exists() else None
-        agreement = np.load(d / "agreement_ratio.npy") if (d / "agreement_ratio.npy").exists() else None
-        confirmation = np.load(d / "confirmation_score.npy") if (d / "confirmation_score.npy").exists() else None
+        prices = np.load(d / "prices.npy", allow_pickle=False)
+        labels = np.load(d / "labels.npy", allow_pickle=False) if (d / "labels.npy").exists() else None
+        predictions = np.load(d / "predictions.npy", allow_pickle=False) if (d / "predictions.npy").exists() else None
+        spreads = np.load(d / "spreads.npy", allow_pickle=False) if (d / "spreads.npy").exists() else None
+        agreement = np.load(d / "agreement_ratio.npy", allow_pickle=False) if (d / "agreement_ratio.npy").exists() else None
+        confirmation = np.load(d / "confirmation_score.npy", allow_pickle=False) if (d / "confirmation_score.npy").exists() else None
 
         # Phase II D10 fix (2026-04-20): calibration precedence is MANIFEST-DRIVEN, not
         # file-existence-driven. The OLD pattern silently preferred calibrated_returns.npy
@@ -184,23 +184,23 @@ class BacktestData:
             manifest is not None and manifest.calibration_method is not None
         )
         if manifest_says_calibrated and (d / "calibrated_returns.npy").exists():
-            predicted_returns = np.load(d / "calibrated_returns.npy")
+            predicted_returns = np.load(d / "calibrated_returns.npy", allow_pickle=False)
         elif manifest is not None and manifest.calibration_method is None:
             # Manifest EXPLICITLY says no calibration — use predicted regardless
             # of whether a stale calibrated file happens to exist.
             if (d / "predicted_returns.npy").exists():
-                predicted_returns = np.load(d / "predicted_returns.npy")
+                predicted_returns = np.load(d / "predicted_returns.npy", allow_pickle=False)
             else:
                 predicted_returns = None
         else:
             # Legacy / no-manifest path (pre-Phase-II signal directories + validate=False).
             if (d / "calibrated_returns.npy").exists():
-                predicted_returns = np.load(d / "calibrated_returns.npy")
+                predicted_returns = np.load(d / "calibrated_returns.npy", allow_pickle=False)
             elif (d / "predicted_returns.npy").exists():
-                predicted_returns = np.load(d / "predicted_returns.npy")
+                predicted_returns = np.load(d / "predicted_returns.npy", allow_pickle=False)
             else:
                 predicted_returns = None
-        regression_labels = np.load(d / "regression_labels.npy") if (d / "regression_labels.npy").exists() else None
+        regression_labels = np.load(d / "regression_labels.npy", allow_pickle=False) if (d / "regression_labels.npy").exists() else None
 
         return cls(
             prices=prices,

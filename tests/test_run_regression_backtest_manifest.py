@@ -633,7 +633,7 @@ class TestPerTradePnlsDump:
         npy_files = sorted(output_dir.glob("round_trip__option_trade_pnls__*.npy"))
         assert len(npy_files) >= 1
         for f in npy_files:
-            arr = np.load(f)
+            arr = np.load(f, allow_pickle=False)
             assert arr.dtype == np.float64, (
                 f"{f.name}: expected float64, got {arr.dtype}"
             )

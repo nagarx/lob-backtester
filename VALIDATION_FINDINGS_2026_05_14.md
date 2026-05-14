@@ -1470,6 +1470,19 @@ Option C: extend `_build_backtest_config` schema to consume them fully (FIND-070
 
 **Fix-direction**: explicit `allow_pickle=False` at every `np.load(...)` call site.
 
+**STATUS:CLOSED 2026-05-14** (Cluster H security sweep). Explicit `allow_pickle=False` added at all **25 `np.load(...)` callsites** across the lob-backtester repository:
+- `src/lobbacktest/data/loader.py` — 4 sites (lines 190, 198, 284, 292)
+- `src/lobbacktest/engine/vectorized.py` — 11 sites (lines 163-168, 187, 192, 198, 200, 203)
+- `tests/test_run_regression_backtest_manifest.py` — 1 site (line 636)
+- `tests/test_integration_real_data.py` — 2 sites (lines 98, 99)
+- `scripts/backtest_deeplob.py` — 2 sites (lines 84, 85)
+- `scripts/e5_regime_filter_test.py` — 3 sites (lines 77, 121, 151; `mmap_mode="r"` preserved)
+- `scripts/param_sweep.py` — 2 sites (lines 100, 101)
+
+NEW regression-lock test at `tests/test_security/test_np_load_allow_pickle_false.py::TestFind110AllowPickleFalseLock::test_every_np_load_passes_allow_pickle_false` scans every `np.load(` callsite in `src/`, `tests/`, and `scripts/` and fails the suite if any future contribution omits the kwarg. Known limitation: regex-based scan does NOT catch `from numpy import load as _l` aliases or fully-qualified `numpy.load(...)` (codebase convention is `import numpy as np`; zero current occurrences of the aliased forms).
+
+Audit context (Wave 1+2+pre-impl): Pre-Impl Agent 1 verified the production TB v3p0 corpus at `data/exports/nvda_v3p0_tb_pt40_sl20_h30/` loads cleanly with `allow_pickle=False`; every `.npy` file produced by upstream (feature-extractor + trainer signal export) contains pure numeric arrays — ZERO regression surface. The FIND-111 path-traversal sister (path resolution check) remains OPEN as a separate hardening cycle. Locks pickle-RCE vector per hft-rules §8 and Appendix A lesson #29.
+
 ---
 
 ### FIND-111 — Path-traversal in `signal_dir`

@@ -144,6 +144,104 @@ class TestSingleRun:
 
 
 # ---------------------------------------------------------------------------
+# #PY-226 — ZeroDteConfig builder nested-fallback + fail-loud
+# ---------------------------------------------------------------------------
+
+
+class TestZeroDteConfigBuildPY226:
+    """Regression tests for #PY-226 (2026-05-14): _build_zero_dte_config now
+    accepts `zero_dte:` block at top-level OR nested under `backtest:` to
+    match production readability YAMLs. Fails loud on both-defined per
+    hft-rules §8 ("never silently drop").
+
+    Mirrors lob-backtester/configs/nvda_readability_first_xnas.yaml + _arcx
+    YAML structure where `zero_dte:` lives under `backtest:` and `opra_costs:`
+    lives under `zero_dte:`.
+    """
+
+    def test_zero_dte_top_level_legacy_path(self, tmp_path: Path):
+        """Legacy: zero_dte: at top-level (matches pre-#PY-226 test fixtures
+        in this file). Back-compat preserved."""
+        signal_dir = _create_regression_signal_dir(tmp_path)
+        config = _make_regression_config(signal_dir, tmp_path)
+        config["zero_dte"] = {
+            "delta": 0.55,
+            "commission_per_contract": 0.85,
+        }
+        runner = ExperimentRunner(config)
+        zd_config = runner._build_zero_dte_config()
+        assert zd_config.delta == 0.55
+        assert zd_config.opra_costs.commission_per_contract == 0.85
+
+    def test_zero_dte_nested_under_backtest(self, tmp_path: Path):
+        """NEW #PY-226: zero_dte: nested under backtest: (production YAML pattern)."""
+        signal_dir = _create_regression_signal_dir(tmp_path)
+        config = _make_regression_config(signal_dir, tmp_path)
+        # Remove top-level zero_dte (set by _make_regression_config); add nested:
+        del config["zero_dte"]
+        config["backtest"]["zero_dte"] = {
+            "delta": 0.55,
+            "opra_costs": {
+                "commission_per_contract": 0.85,
+                "implied_vol": 0.42,
+                "entry_minutes_before_close": 90.0,
+            },
+            "contracts_per_trade": 2,
+        }
+        runner = ExperimentRunner(config)
+        zd_config = runner._build_zero_dte_config()
+        assert zd_config.delta == 0.55
+        assert zd_config.opra_costs.commission_per_contract == 0.85
+        assert zd_config.opra_costs.implied_vol == 0.42
+        assert zd_config.opra_costs.entry_minutes_before_close == 90.0
+        assert zd_config.contracts_per_trade == 2
+
+    def test_zero_dte_both_locations_raises(self, tmp_path: Path):
+        """NEW #PY-226: fail-loud per hft-rules §8 when zero_dte: defined at
+        BOTH top-level AND nested under backtest:."""
+        signal_dir = _create_regression_signal_dir(tmp_path)
+        config = _make_regression_config(signal_dir, tmp_path)
+        # Both locations populated — ambiguity:
+        config["zero_dte"] = {"delta": 0.50}
+        config["backtest"]["zero_dte"] = {"delta": 0.60}
+        runner = ExperimentRunner(config)
+        with pytest.raises(ValueError, match="zero_dte:.*BOTH.*top-level.*backtest"):
+            runner._build_zero_dte_config()
+
+    def test_zero_dte_opra_field_both_locations_raises(self, tmp_path: Path):
+        """NEW #PY-226: fail-loud when opra_costs field defined at BOTH zd
+        top-level AND nested under opra_costs:."""
+        signal_dir = _create_regression_signal_dir(tmp_path)
+        config = _make_regression_config(signal_dir, tmp_path)
+        del config["zero_dte"]
+        config["backtest"]["zero_dte"] = {
+            "commission_per_contract": 0.85,  # top-level of zd
+            "opra_costs": {
+                "commission_per_contract": 0.95,  # nested — conflict
+            },
+        }
+        runner = ExperimentRunner(config)
+        with pytest.raises(ValueError, match="commission_per_contract.*BOTH.*top-level.*opra_costs"):
+            runner._build_zero_dte_config()
+
+    def test_zero_dte_neither_location_defaults(self, tmp_path: Path):
+        """Back-compat: neither top-level nor nested zero_dte: defined →
+        all defaults preserved (does NOT fail-loud since 0 production callers
+        rely on the missing-block path; see #PY-226 LATENT classification)."""
+        signal_dir = _create_regression_signal_dir(tmp_path)
+        config = _make_regression_config(signal_dir, tmp_path)
+        del config["zero_dte"]
+        # backtest.zero_dte also not set
+        runner = ExperimentRunner(config)
+        zd_config = runner._build_zero_dte_config()
+        assert zd_config.delta == 0.50
+        assert zd_config.opra_costs.commission_per_contract == 0.70
+        assert zd_config.opra_costs.implied_vol == 0.40
+        assert zd_config.opra_costs.entry_minutes_before_close == 120.0
+        assert zd_config.contracts_per_trade == 1
+
+
+# ---------------------------------------------------------------------------
 # Sweep
 # ---------------------------------------------------------------------------
 

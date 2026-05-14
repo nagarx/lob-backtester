@@ -19,6 +19,7 @@ Reference:
 """
 
 import json
+import warnings
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -41,6 +42,93 @@ from lobbacktest.strategies.holding import (
 )
 from lobbacktest.strategies.readability import ReadabilityConfig, ReadabilityStrategy
 from lobbacktest.strategies.regression import RegressionStrategy, RegressionStrategyConfig
+
+
+# FIND-070 closure (2026-05-14): per hft-rules §8 "Never silently drop, clamp,
+# or 'fix' data without recording diagnostics." Mirrors hft-ops Phase 7.5 R5
+# idiom at commit 3dd3ccb. Pre-FIND-070, ExperimentRunner silently dropped any
+# YAML key not enumerated below — most notably, production YAMLs
+# configs/nvda_readability_first_{xnas,arcx}.yaml declared `min_agreement: 1.0`
+# + `min_confidence: 0.65` under `backtest:` block where `_build_strategy` reads
+# from `strategy:` block, so the values evaporated silently and the runner used
+# defaults `0.667`/`0.65` (per readability.py:54 P5 FIX 2026-03-17). LATENT in
+# production (those YAMLs are not currently runnable via ExperimentRunner — they
+# lack `signals.dir` so the runner would crash before reaching the gate); the
+# fix is FUTURE-PROTECTION for operators copying the YAML pattern.
+_KNOWN_BACKTEST_KEYS = frozenset({
+    # Fields consumed by _build_backtest_config + BacktestConfig dataclass schema
+    "initial_capital",
+    "position_size",
+    "max_position",
+    "costs",  # sub-dict; ExperimentRunner reads via CostConfig.for_exchange(exchange)
+    "zero_dte",  # nested location accepted per #PY-226 closure 2026-05-14
+    "allow_short",
+    "fill_price",
+    "stop_loss_pct",
+    "take_profit_pct",
+    "trading_days_per_year",
+    "periods_per_day",
+    "exchange",  # top-level override read by _build_backtest_config
+    # DEPRECATED — declared on BacktestConfig dataclass (config.py:312-313)
+    # but NOT consumed by _build_backtest_config + NOT read by engine. Live
+    # home for these gate values is the `strategy:` block (consumed by
+    # ReadabilityStrategy via _build_strategy:354-355). Listed here so the
+    # generic WARN does NOT fire (legacy schema acceptance), but
+    # _build_strategy emits a precise ValueError when readability strategy
+    # is built with these in the wrong block. Slated for removal 2026-10-31
+    # under separate cycle (see PHASE_P_BACKLOG.md #PY-NEW filed alongside
+    # this fix).
+    "min_confidence",
+    "min_agreement",
+})
+
+# Strategy-specific known keys, per _build_strategy branches. `type` is the
+# discriminator on every set.
+_KNOWN_STRATEGY_KEYS_REGRESSION = frozenset({
+    "type", "min_return_bps", "max_spread_bps", "primary_horizon_idx", "cooldown_events",
+})
+_KNOWN_STRATEGY_KEYS_READABILITY = frozenset({
+    "type", "min_agreement", "min_confidence", "max_spread_bps",
+})
+_KNOWN_STRATEGY_KEYS_DIRECTION = frozenset({"type", "shifted"})
+
+_STRATEGY_KEY_SETS: Dict[str, frozenset] = {
+    "regression": _KNOWN_STRATEGY_KEYS_REGRESSION,
+    "readability": _KNOWN_STRATEGY_KEYS_READABILITY,
+    "direction": _KNOWN_STRATEGY_KEYS_DIRECTION,
+}
+
+# Holding policy keys, per _build_holding_policy.
+_KNOWN_HOLDING_KEYS = frozenset({
+    "type", "hold_events", "stop_loss_bps", "take_profit_bps",
+})
+
+
+def _warn_unknown_yaml_keys(
+    block_name: str, raw: Dict[str, Any], known: frozenset,
+) -> None:
+    """Emit ``RuntimeWarning`` when ``raw`` has keys not in ``known``.
+
+    FIND-070 closure (2026-05-14). Mirrors hft-ops Phase 7.5 R5 idiom at
+    commit ``3dd3ccb`` per hft-rules §8. Operator-visible diagnostic;
+    construction proceeds after the warn.
+
+    The ``stacklevel=3`` assumes the 2-hop call chain
+    ``_warn_unknown_yaml_keys -> _build_{backtest_config,holding_policy,
+    strategy} -> caller``; if the helper is moved deeper or invoked from a
+    different call shape, the stacklevel must be updated.
+    """
+    unknown = set(raw.keys()) - known
+    if unknown:
+        warnings.warn(
+            f"ExperimentRunner: silently dropping unknown YAML keys "
+            f"{sorted(unknown)!r} under `{block_name}:` block (not declared on "
+            f"schema). Known keys: {sorted(known)!r}. If these are typos, "
+            f"please correct them. If they belong in a different block, please "
+            f"relocate per lob-backtester/CLAUDE.md FIND-070 closure.",
+            RuntimeWarning,
+            stacklevel=3,
+        )
 
 
 @dataclass
@@ -327,7 +415,35 @@ class ExperimentRunner:
     def _build_strategy(
         self, data: BacktestData, strategy_type: str, params: dict,
     ):
-        """Build strategy from type + params. Reuses existing classes."""
+        """Build strategy from type + params. Reuses existing classes.
+
+        FIND-070 closure (2026-05-14): adds two diagnostic gates:
+
+        1. ``RuntimeWarning`` on unknown keys in the ``strategy:`` block per
+           hft-rules §8 (mirrors hft-ops Phase 7.5 R5 idiom).
+        2. ``ValueError`` (fail-loud per hft-rules §5) when a readability
+           strategy is requested but ``min_agreement`` / ``min_confidence``
+           are declared under ``backtest:`` instead of ``strategy:`` — the
+           pre-FIND-070 silent-drop class. Error message embeds a concrete
+           migration hint pointing at the correct YAML schema.
+        """
+        # FIND-070 Step 1: Warn on unknown strategy-block keys (typo defence).
+        # Only fires for KNOWN strategy types; unknown types fall through to the
+        # bottom-of-method ValueError (more actionable) so we suppress the
+        # generic WARN in that case to keep the operator-facing diagnostic clean.
+        strategy_block = self.config.get("strategy", {})
+        if (
+            isinstance(strategy_block, dict)
+            and strategy_type in _STRATEGY_KEY_SETS
+        ):
+            known_for_type = _STRATEGY_KEY_SETS[strategy_type]
+            _warn_unknown_yaml_keys("strategy", strategy_block, known_for_type)
+
+        # FIND-070 Step 2: Fail-loud detection of wrong-block placement of
+        # readability gate values. Pre-FIND-070, the prod YAMLs declared
+        # `backtest.min_agreement` + `backtest.min_confidence`; runner silently
+        # used readability defaults (0.667 / 0.65 per readability.py:54).
+        # Per hft-rules §5 fail-fast with a precise migration error.
         holding_policy = self._build_holding_policy()
 
         if strategy_type == "regression":
@@ -344,6 +460,35 @@ class ExperimentRunner:
                 holding_policy=holding_policy,
             )
         elif strategy_type == "readability":
+            backtest_block = self.config.get("backtest", {})
+            wrong_block_keys: List[str] = []
+            if isinstance(backtest_block, dict):
+                if (
+                    "min_agreement" not in params
+                    and backtest_block.get("min_agreement") is not None
+                ):
+                    wrong_block_keys.append("min_agreement")
+                if (
+                    "min_confidence" not in params
+                    and backtest_block.get("min_confidence") is not None
+                ):
+                    wrong_block_keys.append("min_confidence")
+            if wrong_block_keys:
+                quoted = ", ".join(repr(k) for k in wrong_block_keys)
+                raise ValueError(
+                    f"FIND-070: readability gate parameter(s) [{quoted}] found "
+                    f"under `backtest:` block, but ExperimentRunner reads these "
+                    f"from `strategy:` block. Pre-fix this silently used the "
+                    f"readability defaults (0.667 / 0.65 per readability.py:54 "
+                    f"P5 FIX) instead of the YAML's declared values.\n"
+                    f"Migrate to:\n"
+                    f"  strategy:\n"
+                    f"    type: readability\n"
+                    f"    min_agreement: <value>\n"
+                    f"    min_confidence: <value>\n"
+                    f"and remove the same keys from the `backtest:` block. See "
+                    f"lob-backtester/CLAUDE.md FIND-070 closure 2026-05-14."
+                )
             return ReadabilityStrategy(
                 predictions=data.predictions,
                 agreement_ratio=data.agreement_ratio,
@@ -366,8 +511,15 @@ class ExperimentRunner:
             raise ValueError(f"Unknown strategy type: '{strategy_type}'")
 
     def _build_holding_policy(self) -> HoldingPolicy:
-        """Build holding policy from config."""
+        """Build holding policy from config.
+
+        FIND-070 closure (2026-05-14): emits ``RuntimeWarning`` on unknown
+        ``holding:`` block keys per hft-rules §8 (mirrors hft-ops Phase 7.5 R5
+        idiom).
+        """
         holding_cfg = self.config.get("holding", {})
+        if isinstance(holding_cfg, dict):
+            _warn_unknown_yaml_keys("holding", holding_cfg, _KNOWN_HOLDING_KEYS)
         policy_type = holding_cfg.get("type", "horizon_aligned")
         hold_events = holding_cfg.get("hold_events", 10)
 
@@ -384,8 +536,15 @@ class ExperimentRunner:
         return HorizonAlignedPolicy(hold_events=hold_events)
 
     def _build_backtest_config(self) -> BacktestConfig:
-        """Build BacktestConfig from experiment config."""
+        """Build ``BacktestConfig`` from experiment config.
+
+        FIND-070 closure (2026-05-14): emits ``RuntimeWarning`` on unknown
+        ``backtest:`` block keys per hft-rules §8 (mirrors hft-ops Phase 7.5
+        R5 idiom at commit ``3dd3ccb``).
+        """
         bt = self.config.get("backtest", {})
+        if isinstance(bt, dict):
+            _warn_unknown_yaml_keys("backtest", bt, _KNOWN_BACKTEST_KEYS)
         exchange = bt.get("exchange", "XNAS")
 
         return BacktestConfig(
@@ -398,15 +557,71 @@ class ExperimentRunner:
         )
 
     def _build_zero_dte_config(self) -> ZeroDteConfig:
-        """Build ZeroDteConfig from experiment config."""
-        zd = self.config.get("zero_dte", {})
+        """Build ZeroDteConfig from experiment config.
+
+        #PY-226 (2026-05-14): accepts `zero_dte:` block at top-level OR nested under
+        `backtest:` to match production readability YAMLs (nvda_readability_first_xnas
+        + _arcx) which nest the block. Pre-#PY-226 reader-side path-mismatch silently
+        dropped the YAML's `zero_dte:` block + fell through to all defaults.
+
+        Sub-structure: per BacktestConfig.from_dict at config.py:405-415, opra-cost
+        fields (commission_per_contract / implied_vol / entry_minutes_before_close)
+        live under `zd.opra_costs:` (nested) in real YAMLs. This reader supports
+        BOTH locations (nested-then-top-level fallback) for back-compat with
+        existing tests that put fields at `zd` top-level.
+
+        Fail-loud per hft-rules §8 on both-defined ambiguities (top-level AND nested
+        `zero_dte:` block) — closes silent-drop class sister to FIND-070.
+        """
+        top_zd = self.config.get("zero_dte")
+        backtest_block = self.config.get("backtest", {})
+        nested_zd = (
+            backtest_block.get("zero_dte") if isinstance(backtest_block, dict) else None
+        )
+
+        if top_zd and nested_zd:
+            raise ValueError(
+                "zero_dte: defined BOTH at top-level AND nested under backtest:. "
+                "Choose ONE location. Recommended: nested under backtest: "
+                "(matches lob-backtester/configs/nvda_readability_first_*.yaml)."
+            )
+
+        # Pick whichever is defined; fall through to {} if neither (back-compat
+        # for default-disabled zero_dte test fixtures + ExperimentRunner callers
+        # that don't set the block at all).
+        zd: Dict[str, Any] = nested_zd if nested_zd else (top_zd or {})
+        if not isinstance(zd, dict):
+            zd = {}
+
+        # Sub-structure: opra_costs nested block (per BacktestConfig.from_dict
+        # pattern at config.py:405-415). Fields can ALSO appear at zd top-level
+        # (legacy test fixtures); read nested first, fall through to top-level.
+        opra_block = zd.get("opra_costs", {})
+        if not isinstance(opra_block, dict):
+            opra_block = {}
+
+        def _opra_field(field: str, default):
+            nested_val = opra_block.get(field)
+            top_val = zd.get(field)
+            if nested_val is not None and top_val is not None:
+                raise ValueError(
+                    f"zero_dte: field '{field}' defined BOTH at zd top-level AND "
+                    f"nested under opra_costs:. Choose ONE location. "
+                    f"Recommended: nested under opra_costs:."
+                )
+            if nested_val is not None:
+                return nested_val
+            if top_val is not None:
+                return top_val
+            return default
+
         return ZeroDteConfig(
             enabled=True,
             delta=zd.get("delta", 0.50),
             opra_costs=OpraCalibratedCosts(
-                commission_per_contract=zd.get("commission_per_contract", 0.70),
-                implied_vol=zd.get("implied_vol", 0.40),
-                entry_minutes_before_close=zd.get("entry_minutes_before_close", 120.0),
+                commission_per_contract=_opra_field("commission_per_contract", 0.70),
+                implied_vol=_opra_field("implied_vol", 0.40),
+                entry_minutes_before_close=_opra_field("entry_minutes_before_close", 120.0),
             ),
             contracts_per_trade=zd.get("contracts_per_trade", 1),
         )

@@ -1092,3 +1092,76 @@ This round uses the standard `OpraCalibratedCosts` + `CostConfig.for_exchange("X
 - **#PY-189 LATENT** (commit `ec54293`, 2026-05-13) remained dormant in R-16d: both Ridge + TLOB pre-slice to 1-D at `exporter.py:421-456` before signal export. HMHP-R arm would be required for 2-D activation. Manifest explicitly documented this.
 - **R-16d-extended (deferred)**: Multi-seed power analysis at H60 point_return (Ridge peak-IC tradeable cell) — pre-registered trigger condition met (H1 = 2/4 borderline) but other gates all PASS suggests data is informative. Defer pending capacity decision.
 - **Analyzer bug fix in same atomic commit**: `r16d_analysis.py:550-554` H-prefix strip on axis values (axis_values stores LABEL 'H10' not int 10). Shipped together with this ledger entry.
+
+---
+
+## Round 16e — Multi-Seed Extended at H60-hold on v3p0 (INDETERMINATE, 2026-05-14)
+
+**Sweep ID**: `cycle9_r16e_multi_seed_h60_point_20260514T015452`
+**Compute**: 1h52m wall-clock on M1 Pro MPS (PyTorch 2.10.0)
+**Effective grid**: 40/40 grid points (10 seeds × 4 cells; `--force` overrode R-16d's 4 pre-existing Ridge cells per intentional cross-cycle override documented at manifest line 34-50)
+**Analyzer**: `hft-ops/scripts/analyze_r16e.py cycle9_r16e_multi_seed_h60_point_20260514T015452` (post #PY-208 spec-drift fix shipped LOCAL 2026-05-14)
+
+### Verdict: INDETERMINATE (exit_code=1)
+
+| Gate | Outcome | Threshold | Pass? |
+|---|---|---|---|
+| H1(a): Ridge × Point × H60-hold pooled CI > 0 at deep_itm_1.4bps | CI=(-0.000468, +0.000313) | CI > 0 | **FAIL** (borderline within ±1%) |
+| H1(b): mean OptRet across 8 thresholds > 0 (primary cell) | +0.00016089 | > 0 | **PASS** |
+| H1(c): per-seed test_ic CI lower bound > 0.05 | 0.1473 | > 0.05 | **PASS** |
+| H2: Ridge/TLOB IC ratio (point_return) > 1.5 | 1.653× [CI 1.479, 1.907] | > 1.5 | **FAIL** (borderline; CI low 1.479 just below floor by 1.4%) |
+| H2: Ridge/TLOB IC ratio (smoothed_return) > 1.5 | 1.084× [CI 1.067, 1.105] | > 1.5 | FAIL (informational; matches CLAUDE.md "Ridge captures 91% TLOB IC") |
+| H4 ARCHITECTURAL: Ridge × seed_42..51 bit-exact identical SHA-256 | All 10 seeds = `fe33748bb772b795...` (independently computed by metrics-validator agent; see #PY-214) | All identical | **PASS** |
+| H6 E8 DIAGNOSTIC: smoothed × {Ridge, TLOB} mean ≤ 0 at H60-hold | Ridge=-0.000200, TLOB=-0.000022 | both ≤ 0 | **CONFIRMED** |
+
+**INDETERMINATE clause TRIGGERED** (per manifest line 157-158): H1(a) FAIL but borderline AND H1(b) PASS → pre-registered remediation = R-16e-extended N=20 + 30-day walk-forward. **Pivot to Triple-Barrier (Option B) AUTHORIZED THIS SESSION over A** per Wave 2 Adversarial analysis evidence (H6 STRUCTURAL CONFIRMATION + TB infrastructure ALREADY SHIPPED end-to-end + ~5-7 hr realistic effort).
+
+### Per-cell summary at primary cell deep_itm_1.4bps
+
+| Cell | n_seeds | n_trades | mean | CI 95% | Significance |
+|---|---|---|---|---|---|
+| temporal_ridge × point_return (PRIMARY) | 1 (H4-pool) | 130 | -0.000054 | (-0.00047, +0.00031) | Crosses zero (BORDERLINE) |
+| temporal_ridge × smoothed_return | 1 (H4-pool) | 132 | -0.000200 | (-0.00055, +0.00019) | Crosses zero (E8 confirmed) |
+| tlob × point_return | 10 | 1264 | -0.000107 | (-0.00021, -0.00001) | **SIG NEGATIVE** |
+| tlob × smoothed_return | 10 | 1319 | -0.000022 | (-0.00012, +0.00008) | Crosses zero (E8 confirmed) |
+
+### H1(b) mean across 8 thresholds — PRIMARY CELL (Ridge × Point × H60-hold)
+
+H1(b) interpretation per manifest line 145-149 (after #PY-208 fix): per-trade-mean equal-weighted across 8 cost-aware thresholds for the primary cell. ALL 10 Ridge seeds produce IDENTICAL per-trade pnls (H4 invariant) so analyzer single-seed pooling applies; n_trades_per_threshold ranges over 8 standard cost-aware deep_itm_1.4bps..max_conv_20bps thresholds.
+
+`mean_across_8_observed = +0.00016089146728446395` (independently bit-exact reproduced by metrics-validator agent 2026-05-14 from per-trade .npy files + 8 backtest summary JSONs)
+
+### Phase Y composer empirical validation
+
+- **40/40 distinct experiment_provenance_hash** populated (continues R-16d's 100% Phase Y trust-column population)
+- **4 distinct compatibility_fingerprint** (2 model × 2 return_type = 4 unique data-axis combos)
+- **2 distinct model_config_hash** (Ridge vs TLOB; expected — arch differs only by model_type)
+- **Cross-cycle BIT-EXACT MATCH** with R-16d: Ridge × Point × H60 cell at R-16e seed_42 produces predicted_returns.npy SHA-256 IDENTICAL to R-16d's single-seed cycle8 (Phase A.3 REDESIGN sklearn-RNG-free invariant CONFIRMED CROSS-CYCLE)
+
+### #PY-208 spec-drift discovery + closure
+
+R-16e's analyzer code (r16e_analysis.py) had DRIFTED from manifest line 145-149+205-208 pre-registration: DROPPED H1(b) "mean across 8 thresholds" gate + ADDED unauthorized "mean at deep_itm_1.4bps > 0" single-threshold gate. Drifted analyzer rendered REFUTE; manifest-aligned analyzer renders INDETERMINATE. Path A root-cause fix shipped LOCAL 2026-05-14:
+- Added `H1_BORDERLINE_MARGIN = 0.01` constant
+- Added `_mean_across_thresholds_primary_cell` helper
+- Extended `R16eDecisionGateOutcome` dataclass (h1_mean_across_8_ok / h1_mean_across_8_observed / h1_ci_borderline)
+- Kept h1_mean_ok / h1_mean_observed as DIAGNOSTIC (informational, not verdict-gating)
+- Modified `_classify_verdict_r16e` signature + body (added INDETERMINATE clause per manifest line 157-158)
+- Tests 34→39 (+5 INDETERMINATE clause tests)
+
+Caught by mid-cycle 3-agent adversarial REFUTE-challenger via fresh manifest re-read. See `PHASE_P_BACKLOG.md #PY-208 STATUS:CLOSED-2026-05-14`.
+
+### Cost-model context
+
+This round uses the standard `OpraCalibratedCosts` + `CostConfig.for_exchange("XNAS")` cost model (IBKR-calibrated from 316 NVDA 0DTE fills). The verdict is **gross of cost validation** because all bootstrap CIs at the primary cell are sub-1% in fraction units — well below the 1.4 bps Deep ITM breakeven. NO net-positive expectation can survive cost-adjustment at the primary Ridge × Point × H60-hold cell.
+
+### Producer-side validation
+
+**Phase Y composer empirically validated cross-cycle**: R-16e Ridge × Point × H60 seed_42 SHA matches R-16d's single-seed cycle8 SHA (BIT-EXACT). Confirms Phase A.3 REDESIGN sklearn-RNG-free invariant holds cross-cycle AND Phase Y dedup correctly identifies (model_type=ridge, return_type=point_return, seed=42, horizon=H60) as equivalent across separate sweeps.
+
+### Outstanding work
+
+- **Triple-Barrier label experiment pivot** [USER AUTHORIZED THIS SESSION 2026-05-14]: H6 E8 STRUCTURAL CONFIRMATION + Wave 2 Adversarial 3 evidence that TB infra is ALREADY SHIPPED motivate pivot to TB labels (de Prado AFML PT/SL/MaxHold) as the architectural fix. Realistic effort 5-7 hr.
+- **#PY-212 NEW**: r16e_analysis.py `EXPECTED_GRID_POINTS = 40` hardcoded constant — sister-site to #PY-208. For N=20+ sweeps, analyzer warning messages misreport `{count}/40`. Promote to manifest-driven OR CLI flag (~30 min).
+- **#PY-213 NEW**: manifest line 159 "N=20 + walk-forward" CONJUNCTIVE remediation ambiguity given H4 invariance. Ridge-cell seed-extension is naïve waste; walk-forward IS meaningful. Future manifests should split into model-specific sub-clauses.
+- **R-16e-extended N=20 DEFERRED**: pre-registered manifest line 159 remediation deferred in favor of Triple-Barrier pivot.
+- **#PY-209 cross-cycle drift audit** (next-cycle hygiene): audit r16c + r16d analyzers against their manifest pre-registrations for #PY-208-class drift.

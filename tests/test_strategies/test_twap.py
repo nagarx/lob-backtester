@@ -13,10 +13,31 @@ Per RULE.md:
 - Formula tests: Signal pattern matches documented TWAP window behavior
 - Edge tests: Window extends beyond data, zero predictions
 - Invariant tests: Exactly one EXIT per TWAP sequence
+
+NOTE (Lesson #14, 2026-05-14): TWAPStrategy is empirically failed at R2 (see
+``lob-backtester/BACKTEST_INDEX.md`` Round 2) due to engine C2 incompatibility
+(engine opens full position on first BUY, ignores subsequent BUYs). Tests are
+preserved for future re-enablement if C2 is resolved, but skipped at module
+level via ``pytestmark`` below. See
+``lob-backtester/VALIDATION_FINDINGS_2026_05_14.md`` Appendix A row #14 +
+``DESIGN_CLUSTER_D1_E_2026_05_14.md`` §4.2.
 """
 
 import numpy as np
 import pytest
+
+# Lesson #14 lock (2026-05-14) — TWAPStrategy empirically failed at R2 due to C2
+# engine incompatibility. Tests preserved for future re-enablement. Removing
+# this skip without re-validating C2 compatibility would trip the encoded
+# lesson. Locked by ``tests/test_strategies/test_twap_skip_discipline.py``.
+pytestmark = pytest.mark.skip(
+    reason=(
+        "TWAPStrategy empirically failed at R2 (see BACKTEST_INDEX); C2 engine "
+        "incompatibility — engine opens full position on first BUY, ignores "
+        "subsequent BUYs. Tests preserved for future re-enablement if C2 is "
+        "resolved. Lesson #14 — see VALIDATION_FINDINGS_2026_05_14.md Appendix A."
+    )
+)
 
 from lobbacktest.strategies.base import Signal
 from lobbacktest.strategies.twap import TWAPStrategy, TWAPStrategyConfig

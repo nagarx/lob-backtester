@@ -8,11 +8,15 @@ Example:
     >>> stats = (
     ...     BacktestStats(result)
     ...         .with_book_size(100_000)
-    ...         .daily()
     ...         .compute()
     ... )
     >>> print(stats.summary())
     >>> stats.plot()
+
+Note:
+    ``.daily()`` / ``.monthly()`` raise ``NotImplementedError`` until
+    ``BacktestResult`` exposes ``timestamps_ns``. See FIND-040 in
+    ``VALIDATION_FINDINGS_2026_05_14.md``.
 """
 
 from dataclasses import dataclass, field
@@ -72,9 +76,12 @@ class BacktestStats:
         >>> stats = (
         ...     BacktestStats(result)
         ...         .with_book_size(100_000)
-        ...         .daily()
         ...         .compute()
         ... )
+
+    Note:
+        ``.daily()`` / ``.monthly()`` raise ``NotImplementedError`` until
+        ``BacktestResult`` exposes ``timestamps_ns``. See FIND-040.
     """
 
     def __init__(self, result: BacktestResult):
@@ -105,27 +112,42 @@ class BacktestStats:
 
     def daily(self) -> "BacktestStats":
         """
-        Aggregate statistics daily.
+        Daily period aggregation — NOT YET SUPPORTED.
 
-        Returns:
-            self for chaining
+        Raises:
+            NotImplementedError: ``BacktestResult`` does not currently carry
+                ``timestamps_ns``, so daily aggregation cannot be computed.
+                Use ``.compute()`` for full-corpus metrics. Track at FIND-040.
         """
-        self._period = "daily"
-        return self
+        raise NotImplementedError(
+            "BacktestStats.daily() requires per-period timestamps on BacktestResult; "
+            "BacktestResult does not currently carry timestamps_ns. Daily aggregation is "
+            "not yet supported. Use .compute() for full-corpus metrics instead. "
+            "Track at FIND-040 in lob-backtester/VALIDATION_FINDINGS_2026_05_14.md."
+        )
 
     def monthly(self) -> "BacktestStats":
         """
-        Aggregate statistics monthly.
+        Monthly period aggregation — NOT YET SUPPORTED.
 
-        Returns:
-            self for chaining
+        Raises:
+            NotImplementedError: ``BacktestResult`` does not currently carry
+                ``timestamps_ns``, so monthly aggregation cannot be computed.
+                Use ``.compute()`` for full-corpus metrics. Track at FIND-040.
         """
-        self._period = "monthly"
-        return self
+        raise NotImplementedError(
+            "BacktestStats.monthly() requires per-period timestamps on BacktestResult; "
+            "BacktestResult does not currently carry timestamps_ns. Monthly aggregation is "
+            "not yet supported. Use .compute() for full-corpus metrics instead. "
+            "Track at FIND-040 in lob-backtester/VALIDATION_FINDINGS_2026_05_14.md."
+        )
 
     def full(self) -> "BacktestStats":
         """
-        Compute statistics for full period (default).
+        Period selector — full-corpus (default).
+
+        No-op; ``.compute()`` returns full-corpus metrics regardless of period.
+        Kept for fluent-API symmetry with future ``.daily()`` / ``.monthly()``.
 
         Returns:
             self for chaining

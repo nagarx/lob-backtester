@@ -40,9 +40,6 @@ backtest:
     maker_rebate_bps: -0.15
     commission_per_trade: 0.0
 
-  min_agreement: 1.0
-  min_confidence: 0.65
-
   zero_dte:
     enabled: true
     delta: 0.50
@@ -60,6 +57,17 @@ backtest:
       commission_per_contract: 0.70
       implied_vol: 0.40
       entry_minutes_before_close: 120.0
+
+# Readability strategy gates (FIND-070 closure 2026-05-14).
+# Pre-fix, these were declared under `backtest:` block and silently dropped by
+# ExperimentRunner._build_strategy (which reads from `strategy:` block only),
+# so runs used the readability defaults (0.667 / 0.65 per readability.py:54
+# P5 FIX 2026-03-17) instead of the YAML's declared values.
+# See lob-backtester/CLAUDE.md FIND-070 closure.
+strategy:
+  type: readability
+  min_agreement: 1.0
+  min_confidence: 0.65
 
 tags:
   - nvda

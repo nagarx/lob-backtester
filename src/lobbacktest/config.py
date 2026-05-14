@@ -314,6 +314,42 @@ class BacktestConfig:
 
     def __post_init__(self) -> None:
         """Validate configuration parameters."""
+        # FIND-070 closure (2026-05-14): `min_agreement` / `min_confidence` are
+        # declared on the BacktestConfig dataclass schema for legacy YAML
+        # compat (`BacktestConfig.from_dict` / `load_yaml` path), but NOT
+        # consumed by `ExperimentRunner._build_backtest_config` and NOT read
+        # by the engine. The live home for these gate values is the `strategy:`
+        # block (consumed by `ReadabilityStrategy` via
+        # `ExperimentRunner._build_strategy:354-355`). Emit a
+        # `DeprecationWarning` when operators set non-None values here so that
+        # the wrong-block placement is machine-visible BEFORE the 2026-10-31
+        # field-removal cycle (see PHASE_P_BACKLOG.md FIND-070 closure
+        # follow-up).
+        import warnings
+        if self.min_agreement is not None:
+            warnings.warn(
+                "BacktestConfig.min_agreement is DEPRECATED: this field is not "
+                "consumed by ExperimentRunner._build_backtest_config nor read "
+                "by the engine. The live home is the `strategy:` block "
+                "(consumed by ReadabilityStrategy via _build_strategy). "
+                "Migrate to: `strategy: {type: readability, min_agreement: "
+                "<value>}` and remove from `backtest:` block. Scheduled for "
+                "removal 2026-10-31.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        if self.min_confidence is not None:
+            warnings.warn(
+                "BacktestConfig.min_confidence is DEPRECATED: this field is not "
+                "consumed by ExperimentRunner._build_backtest_config nor read "
+                "by the engine. The live home is the `strategy:` block "
+                "(consumed by ReadabilityStrategy via _build_strategy). "
+                "Migrate to: `strategy: {type: readability, min_confidence: "
+                "<value>}` and remove from `backtest:` block. Scheduled for "
+                "removal 2026-10-31.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         if self.initial_capital <= 0:
             raise ValueError(f"initial_capital must be > 0, got {self.initial_capital}")
         if not (0 < self.position_size <= 1.0):

@@ -291,8 +291,8 @@ class BacktestConfig:
     take_profit_pct: Optional[float] = None
     trading_days_per_year: float = 252.0
     periods_per_day: float = 1000.0
-    min_confidence: float = 0.0       # For readability-gated strategies
-    min_agreement: float = 0.0        # For readability-gated strategies
+    min_confidence: Optional[float] = None  # DEPRECATED 2026-10-31 — emits DeprecationWarning; use strategy.min_confidence
+    min_agreement: Optional[float] = None   # DEPRECATED 2026-10-31 — emits DeprecationWarning; use strategy.min_agreement
 ```
 
 ### ZeroDteConfig and OpraCalibratedCosts

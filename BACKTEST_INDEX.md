@@ -1308,3 +1308,92 @@ Phase 1 exporter adapter at `lob-model-trainer/src/lobtrainer/export/exporter.py
 - **R-20 NEXT CANDIDATE**: 116-feature or 128-feature on TB v3p0 — does feature expansion lift PT precision above 22% plateau?
 - **#PY-218 producer-side cleanup** (STILL OPEN; not blocking R-17a): Rust types.rs:117-131 LIST format inconsistency at 3 sister sites. Validator-side workaround (hft-contracts 2.7.1) is shipped. ~1.5 hr.
 - **#PY-219 NEW candidate** (Wave 1D §3 finding, 2026-05-14): TB↔SHIFTED_MAPPING alignment is coincidental not contractual. Backtester `{0=Down→SELL, 1=Stable→no-entry, 2=Up→BUY}` happens to align with TB `{0=SL→short, 1=Timeout→no-entry, 2=PT→long}` only because of TB barrier order semantics. Add TB label-encoding semantic alignment validator. ~30 min.
+
+---
+
+## FIND-070 Closure (2026-05-14): Readability gate silent-misconfig
+
+### Reframing post-adversarial-validation (Wave 2 Agent F)
+
+**Original framing (overstated)**: "Any historical experiment via `ExperimentRunner.from_yaml(nvda_readability_first_*.yaml)` has silently-wrong gate metadata."
+
+**Corrected framing**: **LATENT-MISCONFIGURATION-TRAP** for FUTURE operators copying the YAML pattern. The two YAMLs (`configs/nvda_readability_first_xnas.yaml` + `_arcx.yaml`) are NOT currently runnable via `ExperimentRunner.from_yaml` — they lack a `signals.dir` block, so the runner would fail at `BacktestData.from_signal_dir(str(signal_dir), ...)` before ever reaching the gate. `BACKTEST_INDEX.md` contains ZERO entries citing these YAMLs being executed. The bug is real but the impact is **future-protection** for operators who'd otherwise inherit the silent default-substitution.
+
+### Root cause (ground-truth verified)
+
+YAML schema split incorrectly placed readability strategy parameters under the engine-level block:
+
+```yaml
+# Pre-fix YAML (BROKEN — silently dropped):
+backtest:
+  ...
+  min_agreement: 1.0      # ← WRONG BLOCK
+  min_confidence: 0.65    # ← WRONG BLOCK
+# (no strategy: block at all)
+```
+
+`ExperimentRunner._build_strategy` (experiment.py:415, 499-500) reads strategy parameters from the `strategy:` block ONLY (experiment.py:281-282: `base_params = {k: v for k, v in strategy_config.items() if k != "type"}`). When `strategy:` is missing entirely, `strategy_type` defaults to `"regression"` (experiment.py:280) and `min_agreement` / `min_confidence` under `backtest:` are silently dropped. Even if `ReadabilityStrategy` had been built (it wasn't), `params.get("min_agreement", 0.667)` (experiment.py:499) would have used the readability default (`readability.py:54` P5 FIX 2026-03-17), not the YAML's `1.0`.
+
+### Closure fixes (3-step)
+
+1. **Module-level frozensets** at `experiment.py` enumerate schema fields per block:
+   - `_KNOWN_BACKTEST_KEYS` (14 keys; includes `min_agreement` / `min_confidence` per `BacktestConfig` dataclass schema at config.py:312-313 — DEPRECATED via `BacktestConfig.__post_init__` `DeprecationWarning`, slated for field removal 2026-10-31)
+   - `_KNOWN_HOLDING_KEYS` (4 keys)
+   - `_KNOWN_STRATEGY_KEYS_{REGRESSION,READABILITY,DIRECTION}` (per-strategy schema)
+
+2. **`_warn_unknown_yaml_keys` helper** emits single consolidated `RuntimeWarning` on unknown keys; construction proceeds. Mirrors hft-ops Phase 7.5 R5 idiom at commit `3dd3ccb` per hft-rules §8 ("never silently drop").
+
+3. **Fail-loud wrong-block detection** at `_build_strategy` readability branch: when `min_agreement` or `min_confidence` is found under `backtest:` but NOT under `strategy:`, raise `ValueError` with precise migration hint per hft-rules §5. Replaces the silent-default fallback that would have re-introduced dual-source-of-truth (hft-rules §0 violation).
+
+4. **YAML migration**: both production YAMLs moved gate parameters from `backtest:` block to a NEW `strategy:` block:
+
+```yaml
+# Post-fix YAML (CORRECT):
+backtest:
+  initial_capital: 100000.0
+  position_size: 0.1
+  ...
+  costs: {...}
+  zero_dte: {...}
+
+strategy:
+  type: readability
+  min_agreement: 1.0
+  min_confidence: 0.65
+```
+
+### Test coverage
+
+NEW `tests/test_experiment_unknown_keys.py` ships 27 parametrized tests across 8 classes:
+
+| Test class | Tests | Coverage |
+|---|---|---|
+| `TestWarnUnknownYAMLKeysHelper` | 4 | Helper-function contract (single/empty/multi/known) |
+| `TestBuildBacktestConfigUnknownKeys` | 3 | Backtest-block WARN path + min_agreement legacy tolerance |
+| `TestBuildHoldingPolicyUnknownKeys` | 2 | Holding-block WARN path |
+| `TestBuildStrategyWrongBlockDetection` | 6 | FIND-070 core: ValueError raise paths + correct-placement passthrough + regression-strategy non-interaction |
+| `TestBuildStrategyUnknownStrategyKeys` | 3 | Strategy-block WARN path (per-strategy frozensets) |
+| `TestFrozensetSchemaSanity` | 4 | Lock frozenset memberships against accidental drift |
+| `TestSweepPathFIND070Interaction` | 2 | `_run_sweep` populates `params[min_agreement]` → FIND-070 raise correctly suppressed (mid-impl HIGH-1 gap closure) |
+| `TestBacktestConfigDeprecatedFields` | 3 | `BacktestConfig.__post_init__` emits `DeprecationWarning` for non-None `min_agreement` / `min_confidence` (mid-impl HIGH-2 closure) |
+
+**Test results**: 27/27 PASS in 0.17s; ZERO regressions across full suite (**439 passed + 16 skipped**, was 412 passed pre-fix; net +27 tests added).
+
+### Mid-impl gate closures (2026-05-14 same-cycle)
+
+Adversarial code-reviewer agent returned APPROVE-WITH-FIXES; 4 fixes applied same-commit:
+
+- **HIGH-2 (machine-visible deprecation signal)**: Added `BacktestConfig.__post_init__` `DeprecationWarning` for non-None `min_agreement` / `min_confidence` fields. Operators setting either field on the dataclass now see an explicit migration message before the 2026-10-31 field-removal cycle. Closes the "deprecated-by-comment, no machine signal" gap.
+- **HIGH-1 + MED-1 (sweep-path coverage)**: Added `TestSweepPathFIND070Interaction` (2 tests) locking that `_run_sweep` populating `params[min_agreement]` correctly suppresses the FIND-070 raise.
+- **MED-4 (frozenset count drift)**: Reframed citation from "13 keys" → "14 keys"; added `test_backtest_frozenset_size_and_min_agreement_membership` locking the count.
+- **LOW-2 (stacklevel reasoning)**: Documented the 2-hop call-chain assumption in `_warn_unknown_yaml_keys` docstring.
+
+### Deferred follow-ups (filed in PHASE_P_BACKLOG.md)
+
+- **MED-3 (reuse-first threshold)**: hft-ops Phase 7.5 R5 idiom + lob-backtester FIND-070 idiom are duplicated. If a 3rd consumer ever emerges, extract `_warn_unknown_yaml_keys` to `hft_contracts` per Phase Q.4 BaseTrainer Protocol precedent.
+- **2026-10-31 field-removal cycle**: Remove `BacktestConfig.min_agreement` + `BacktestConfig.min_confidence` fields entirely after the DeprecationWarning grace period. Coordinate with any `BacktestConfig.from_dict` / `load_yaml` consumers (currently only `tests/test_config.py`).
+
+### Encoded lessons (per CLAUDE.md Lesson-NN convention)
+
+- **Lesson NN — Wrong-block silent-drop class**: When a YAML schema splits sub-blocks (`backtest:` for engine + `strategy:` for trading-policy), operators routinely place parameters under the wrong block. The fix is per-block frozenset enumeration + WARN-on-unknown-keys + fail-loud detection for KNOWN-wrong-placement cases. Mirrors hft-ops Phase 7.5 R5 at commit `3dd3ccb`.
+- **Lesson NN — Reframe "historical corruption" claims by ground-truth**: Initial FIND-070 framing claimed "historical experiments via ExperimentRunner have silently-wrong gate metadata." Wave 2 Agent F adversarial verification showed the YAMLs are not currently runnable (missing `signals.dir`); BACKTEST_INDEX has zero hits citing them being executed. The bug is real but **LATENT-MISCONFIG-TRAP** for future operators, not historical corruption. Per hft-rules §13 + saved-feedback-memory mandate "depend on ground truth code over docs."

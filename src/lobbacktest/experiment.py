@@ -49,12 +49,14 @@ from lobbacktest.strategies.regression import RegressionStrategy, RegressionStra
 # idiom at commit 3dd3ccb. Pre-FIND-070, ExperimentRunner silently dropped any
 # YAML key not enumerated below — most notably, production YAMLs
 # configs/nvda_readability_first_{xnas,arcx}.yaml declared `min_agreement: 1.0`
-# + `min_confidence: 0.65` under `backtest:` block where `_build_strategy` reads
-# from `strategy:` block, so the values evaporated silently and the runner used
-# defaults `0.667`/`0.65` (per readability.py:54 P5 FIX 2026-03-17). LATENT in
-# production (those YAMLs are not currently runnable via ExperimentRunner — they
-# lack `signals.dir` so the runner would crash before reaching the gate); the
-# fix is FUTURE-PROTECTION for operators copying the YAML pattern.
+# + `min_confidence: 0.65` under `backtest:` block where `_build_strategy`
+# (def at line 415; readability params consumed at lines 499-500) reads from
+# `strategy:` block only, so the values evaporated silently and the runner
+# used defaults `0.667`/`0.65` (per readability.py:54 P5 FIX 2026-03-17).
+# LATENT in production (those YAMLs are not currently runnable via
+# ExperimentRunner — they lack `signals.dir` so the runner would crash before
+# reaching the gate); the fix is FUTURE-PROTECTION for operators copying the
+# YAML pattern.
 _KNOWN_BACKTEST_KEYS = frozenset({
     # Fields consumed by _build_backtest_config + BacktestConfig dataclass schema
     "initial_capital",

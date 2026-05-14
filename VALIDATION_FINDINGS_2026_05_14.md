@@ -969,6 +969,8 @@ Option B: REMOVE — current engine treats all fills as taker.
 **Evidence**: `config.py:457-468`. Zero usages anywhere in the pipeline. `Dict[str, any]` is technically valid only because `any` is callable; Pyright would flag.
 **Fix-direction**: delete OR expose via tested comparison module.
 
+**STATUS:CLOSED 2026-05-14** (Cluster H/#PY-228+FIND-067 type hygiene commit). `ComparisonConfig` class **deleted** from `src/lobbacktest/config.py` (was at lines 493-504 in HEAD `f8f455f`; the original FIND-067 evidence cited "457-468" was pre-sister-cycle, shifted by the `f8f455f` `__post_init__` insert). Verified zero consumers monorepo-wide via `grep -rn "ComparisonConfig" --include="*.py"` (Pre-Impl Agent 2). Deletion is the simpler closure path per fix-direction "delete OR expose"; "expose" would have required net-new test scaffolding without justifying use cases. The sister `Dict[str, any]` typo on `ComparisonConfig.models` is therefore eliminated by class deletion (one of the original 6 `Dict[str, any]` sites caught by #PY-228 audit). Locks via `tests/test_type_annotation_discipline.py` (AST-walk regression test) — prevents reintroduction.
+
 ---
 
 ### FIND-068 — `BacktestConfig.from_dict` hardcoded `costs_dict.get("spread_bps", 1.0)` defaults

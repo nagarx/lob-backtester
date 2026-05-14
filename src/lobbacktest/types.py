@@ -11,7 +11,7 @@ All types are immutable dataclasses with clear documentation.
 
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -208,7 +208,7 @@ class BacktestResult:
     predictions: np.ndarray
     labels: Optional[np.ndarray]
     metrics: Dict[str, float]
-    config_dict: Dict[str, any]
+    config_dict: Dict[str, Any]
     initial_capital: float
     final_equity: float
     total_trades: int
@@ -323,7 +323,7 @@ class BacktestResult:
         lines.append("=" * 60)
         return "\n".join(lines)
 
-    def to_dict(self) -> Dict[str, any]:
+    def to_dict(self) -> Dict[str, Any]:
         """
         Convert result to a dictionary for serialization.
 

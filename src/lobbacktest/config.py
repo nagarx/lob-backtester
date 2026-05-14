@@ -14,7 +14,7 @@ Configuration Philosophy (from RULE.md):
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Literal
+from typing import Any, Dict, List, Literal, Optional
 import yaml
 
 
@@ -222,7 +222,7 @@ class OpraCalibratedCosts:
             entry_minutes_before_close=120.0,
         )
 
-    def to_dict(self) -> Dict[str, any]:
+    def to_dict(self) -> Dict[str, Any]:
         return {
             "atm_call_half_spread": self.atm_call_half_spread,
             "atm_put_half_spread": self.atm_put_half_spread,
@@ -384,7 +384,7 @@ class BacktestConfig:
 
         return np.sqrt(self.trading_days_per_year * self.periods_per_day)
 
-    def to_dict(self) -> Dict[str, any]:
+    def to_dict(self) -> Dict[str, Any]:
         """Convert configuration to a serializable dictionary."""
         result = {
             "initial_capital": self.initial_capital,
@@ -422,7 +422,7 @@ class BacktestConfig:
         return result
 
     @classmethod
-    def from_dict(cls, d: Dict[str, any]) -> "BacktestConfig":
+    def from_dict(cls, d: Dict[str, Any]) -> "BacktestConfig":
         """Create configuration from a dictionary."""
         costs_dict = d.get("costs", {})
         exchange = costs_dict.get("exchange")
@@ -488,17 +488,3 @@ class BacktestConfig:
         """Save configuration to a YAML file."""
         with open(path, "w") as f:
             yaml.dump(self.to_dict(), f, default_flow_style=False)
-
-
-@dataclass
-class ComparisonConfig:
-    """
-    Configuration for comparing multiple models.
-
-    Attributes:
-        models: Dict mapping model name to predictions array
-        baseline_name: Optional baseline model name for relative comparisons
-    """
-
-    models: Dict[str, any] = field(default_factory=dict)
-    baseline_name: Optional[str] = None

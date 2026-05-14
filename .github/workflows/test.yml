@@ -77,9 +77,11 @@ jobs:
           python -c "import hft_contracts, numpy, sys; print(f'Python {sys.version.split()[0]}  |  hft_contracts {hft_contracts.__version__}  |  numpy {numpy.__version__}')"
 
       - name: Run tests
-        # Expected on fresh CI (2026-04-21): 359 passing + 8 skipped per root
-        # CLAUDE.md Phase II hardening close-out stamp. The 8 skips are
-        # torch + real-data gated (test_integration_real_data.py).
+        # Expected on fresh CI (2026-05-14): 412 passing + 16 skipped per
+        # Cluster D.1+E close-out stamp (`DESIGN_CLUSTER_D1_E_2026_05_14.md`
+        # §3 + §4). The 16 skips break down as: 8 torch + real-data gated
+        # (test_integration_real_data.py) + 8 TWAP tests (Lesson #14 closure
+        # via module-level pytestmark = pytest.mark.skip in test_twap.py).
         # Override pyproject's `addopts = -v --tb=short` to `-q --tb=short`
         # for compact CI output; the pyproject-declared verbose mode is for
         # local dev, not CI log volume.

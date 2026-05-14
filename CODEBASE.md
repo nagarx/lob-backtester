@@ -1,6 +1,6 @@
 # LOB-Backtester: Codebase Technical Reference
 
-> **Version**: 0.1.0 | **Tests**: 353 (345 passed + 8 skipped) | **Last Updated**: 2026-04-20 (Phase 7 Stage 7.4 Round 5)  
+> **Version**: 0.1.0 | **Tests**: 428 (412 passed + 16 skipped) | **Last Updated**: 2026-05-14 (Cluster D.1+E — FIND-001/002/003/040 + Lesson #14 closures)  
 > **Purpose**: Complete technical details for LLMs and developers to understand, modify, and extend the codebase without prior context.
 
 ## State at HEAD (cumulative through Phase 7 Round 5)
@@ -596,7 +596,6 @@ Metrics receive a context dict with:
 stats = (
     BacktestStats(result)
         .with_book_size(100_000)
-        .daily()
         .compute()
 )
 
@@ -604,14 +603,20 @@ print(stats.summary())
 stats.plot()
 ```
 
+> **Note (2026-05-14, FIND-040 closure)**: ``.daily()`` / ``.monthly()`` raise
+> ``NotImplementedError`` until ``BacktestResult`` exposes ``timestamps_ns``;
+> ``.full()`` is preserved as a no-op self-return for fluent-API symmetry.
+> See ``DESIGN_CLUSTER_D1_E_2026_05_14.md`` §4.1 +
+> ``VALIDATION_FINDINGS_2026_05_14.md`` FIND-040.
+
 ### Methods
 
 | Method | Description |
 |--------|-------------|
 | `.with_book_size(n)` | Set capital for normalization |
-| `.daily()` | Aggregate by day |
-| `.monthly()` | Aggregate by month |
-| `.full()` | Use entire period |
+| `.daily()` | **NotImplementedError until `BacktestResult.timestamps_ns` lands** (FIND-040) |
+| `.monthly()` | **NotImplementedError until `BacktestResult.timestamps_ns` lands** (FIND-040) |
+| `.full()` | No-op self-return; ``.compute()`` returns full-corpus metrics regardless |
 | `.with_metrics(list)` | Add custom metrics |
 | `.compute()` | Run computation |
 | `.summary()` | Get text summary |

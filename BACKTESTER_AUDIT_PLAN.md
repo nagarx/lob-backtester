@@ -1,5 +1,34 @@
 # LOB-Backtester: Audit, Testing & Redesign Plan
 
+> **⚠️ STATUS (2026-05-14): SUPERSEDED for CURRENT STATE by [`VALIDATION_FINDINGS_2026_05_14.md`](VALIDATION_FINDINGS_2026_05_14.md)**.
+>
+> This document (last updated 2026-03-17) captures the **first** lob-backtester audit and is preserved as **historical record** of the P0-P10 / C1-C3 / H1-H3 / N1-N4 / V1-V5 cycle. It predates Phase II (2026-04-20), Phase V (2026-04-21), Phase X (2026-05-04), Phase Y / Z / Stage 8 (2026-05-05), R-9..R-17a backtest rounds, and the v3p0 corpus. For an empirically-verified picture of the CURRENT state — including 169 findings across 17 themes, the 23-item encoded-lessons defensive list, and adversarial-validated triage — consult `VALIDATION_FINDINGS_2026_05_14.md`.
+>
+> **Status of legacy entries**:
+> - P0 (label-execution mismatch validation) — DONE 2026-03-17.
+> - P1 (Sharpe recalc post-C1) — DONE (E2 experiment cycle).
+> - P2 (trade_pnls includes entry cost) — DONE; encoded lesson #2.
+> - P3 (short sizing symmetric) — DONE; encoded lesson #3.
+> - P4 (primary_horizon_idx default 0) — DONE; encoded lesson #4.
+> - P5 (min_agreement default 0.667) — DONE for readability.py; **NOT migrated to hybrid.py** (FIND-049).
+> - P6, P7 (label encoding, holding policy) — DONE.
+> - P8 (magic number extraction) — **STILL OPEN** (FIND-012, FIND-045, FIND-129).
+> - P9 (SignalManifest validation) — DONE.
+> - P10 (maker_rebate_bps dead) — **STILL OPEN** (FIND-064).
+> - P11 (docs updates) — partial; ledger drift confirmed in FIND-103, FIND-161.
+> - C2 (TWAP-engine incompat) — **NOT enforced in code** (FIND-051); CLAUDE.md says SKIP, no actual skip marker.
+> - C3 (short sizing) — DONE; encoded lesson #3.
+> - H1 (hardcoded labels) — partially closed (FIND-042 for direction.py).
+> - H2 (maker_rebate_bps) — **STILL OPEN** (FIND-064).
+> - H3 (magic numbers) — partially open per FIND-012.
+> - N1-N4, V1-V5 — see FIND-001..050 for current status.
+>
+> **Methodology lessons learned**: this 2026-03-17 audit was single-wave (no adversarial validation). The 2026-05-14 cycle ran 3-wave audit (Wave 1: 8 agents per-module, Wave 2: 8 adversarial agents, Wave 3: synthesis). Wave 2 surfaced **40+ NEW findings** the single-wave audit missed (especially in security, performance, concurrency, numerical precision, reproducibility, architectural debt) AND **refuted 5+ Wave-1 claims** that would have caused refactor disasters (e.g., `backtest_deeplob.py` is NOT a fossil — it's the production default for hft-ops). Multi-wave should be the default for major audits going forward.
+>
+> Original 2026-03-17 audit content preserved below for historical reference.
+
+---
+
 > **Purpose**: Comprehensive audit of lob-backtester for issues, test coverage, documentation accuracy, and long-term design quality.
 > **Date**: 2026-03-16 (initial audit), 2026-03-17 (deep investigation)
 > **Approach**: Per RULE.md §0 — build modules that last for years. No quick fixes.
@@ -13,6 +42,10 @@
 - **Total issues**: 25 (7 critical/high code bugs, 5 unvalidated assumptions, 13 medium/low)
 - **Test coverage**: Grew from 146 → **330 tests** (+184 new), covering 12 test modules. Phases 1-3b added 64 tests for bug fixes, LabelMapping, BacktestContext, SignalManifest, and ExperimentRunner.
 - **Line coverage**: 61% overall; critical modules (engine, strategies, metrics, config, types) all 85%+
+
+---
+
+> *Note (2026-05-14)*: The numbers above are stale per current state. Empirical pytest collection 2026-05-14: **414 tests** (5 of 6 doc sources cite different counts; root CLAUDE.md is closest at 414). See `VALIDATION_FINDINGS_2026_05_14.md` FIND-103.
 
 ---
 

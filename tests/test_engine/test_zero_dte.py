@@ -22,6 +22,7 @@ from lobbacktest.engine.zero_dte import (
     EPS,
     NPRIME_ZERO,
     TRADING_MINUTES_PER_YEAR,
+    ZeroDteAlternationError,
     ZeroDtePnLTransformer,
     ZeroDteResult,
     theta_bsm_per_share,
@@ -185,3 +186,73 @@ class TestZeroDteConfig:
         """Default: 1 contract per trade."""
         config = ZeroDteConfig()
         assert config.contracts_per_trade == 1
+
+
+class TestAlternationContract:
+    """FIND-003 lock tests: ZeroDtePnLTransformer raises ZeroDteAlternationError on contract breach.
+
+    Post-FIND-001 fix, engine emits Trade(FLAT) symmetrically with trade_pnls.append, so the
+    precondition `len(trades) == 2 * n_round_trips` is structurally guaranteed in production.
+    The precondition raise + per-pair side assert are reserved for regression detection +
+    external Trade-stream consumers.
+
+    See DESIGN_CLUSTER_D1_E_2026_05_14.md §3.3 + VALIDATION_FINDINGS_2026_05_14.md FIND-003.
+    """
+
+    def _make_result(
+        self, trades: list, trade_pnls: np.ndarray, n: int = 15
+    ) -> BacktestResult:
+        """Build a BacktestResult fixture satisfying FIND-002 invariant but stressing FIND-003."""
+        return BacktestResult(
+            equity_curve=np.array([100.0] * n),
+            returns=np.zeros(n - 1),
+            positions=np.zeros(n),
+            prices=np.array([10.0] * n),
+            predictions=np.zeros(n),
+            labels=None,
+            trades=trades,
+            trade_pnls=trade_pnls,
+            metrics={},
+            config_dict={},
+            initial_capital=100.0,
+            final_equity=100.0,
+            total_trades=len(trades),
+            start_index=0,
+            end_index=n - 1,
+        )
+
+    def test_alternation_orphan_trade_raises_via_precondition(self):
+        """FIND-003 lock: precondition raises when len(trades) != 2 * n_round_trips.
+
+        Fixture: 3 trades (BUY, FLAT, BUY) + 1 trade_pnl.
+        FIND-002 invariant: n_closes(FLAT) = 1 == len(trade_pnls)=1 → passes construction.
+        FIND-003 precondition: 2 * n_round_trips = 2 != len(trades) = 3 → raises.
+        """
+        trades = [
+            Trade(index=0, side=TradeSide.BUY, price=10.0, size=10, cost=0.1),
+            Trade(index=5, side=TradeSide.FLAT, price=10.5, size=10, cost=0.1),
+            Trade(index=10, side=TradeSide.BUY, price=10.2, size=10, cost=0.1),  # ORPHAN
+        ]
+        result = self._make_result(trades, trade_pnls=np.array([4.8]))
+
+        transformer = ZeroDtePnLTransformer(config=ZeroDteConfig())
+        with pytest.raises(ZeroDteAlternationError, match="2 trades per round-trip"):
+            transformer.transform(result)
+
+    def test_alternation_per_pair_violation_raises(self):
+        """FIND-003 lock: per-pair side assert catches reordered trades.
+
+        Fixture: 4 trades + 2 trade_pnls (FIND-002 + precondition pass) but reordered as
+        (BUY, BUY, FLAT, FLAT) instead of (BUY, FLAT, BUY, FLAT).
+        """
+        trades = [
+            Trade(index=0, side=TradeSide.BUY, price=10.0, size=10, cost=0.1),
+            Trade(index=1, side=TradeSide.BUY, price=10.1, size=10, cost=0.1),  # WRONG — should be FLAT
+            Trade(index=5, side=TradeSide.FLAT, price=10.5, size=10, cost=0.1),
+            Trade(index=6, side=TradeSide.FLAT, price=10.6, size=10, cost=0.1),
+        ]
+        result = self._make_result(trades, trade_pnls=np.array([4.8, 5.0]))
+
+        transformer = ZeroDtePnLTransformer(config=ZeroDteConfig())
+        with pytest.raises(ZeroDteAlternationError, match="alternation violated"):
+            transformer.transform(result)

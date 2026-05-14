@@ -240,6 +240,20 @@ class BacktestResult:
             raise ValueError(
                 f"total_trades {self.total_trades} != len(trades) {len(self.trades)}"
             )
+        # FIND-002 fix (2026-05-14): round-trip pairing invariant.
+        # Contract documented at L194-200 ("len(trade_pnls) == number of round-trip trades (closes)")
+        # but never enforced pre-2026-05-14. Each round-trip = 1 entry trade (BUY|SELL) + 1 exit
+        # trade (FLAT) + 1 P&L. Co-locks with FIND-001 (engine now emits Trade(FLAT) atomically).
+        # See DESIGN_CLUSTER_D1_E_2026_05_14.md §3.2 + VALIDATION_FINDINGS_2026_05_14.md FIND-002.
+        n_closes = sum(1 for t in self.trades if t.side == TradeSide.FLAT)
+        if len(self.trade_pnls) != n_closes:
+            raise ValueError(
+                f"P2 round-trip pairing contract: each closed round-trip = 1 FLAT trade + 1 trade_pnl; "
+                f"got {n_closes} FLAT trades vs {len(self.trade_pnls)} trade_pnls. "
+                f"If you constructed BacktestResult directly (test fixture or external producer), "
+                f"emit Trade(side=TradeSide.FLAT, ...) once per round-trip close. "
+                f"See FIND-001/FIND-002 cluster."
+            )
 
     @property
     def total_return(self) -> float:

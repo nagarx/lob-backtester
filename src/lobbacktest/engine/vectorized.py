@@ -15,6 +15,7 @@ Design Philosophy:
 - Results include all information needed for analysis
 """
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -36,6 +37,8 @@ from lobbacktest.metrics.trading import (
 )
 from lobbacktest.strategies.base import Signal, SignalOutput, Strategy
 from lobbacktest.types import BacktestResult, Position, PositionSide, Trade, TradeSide
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -437,9 +440,31 @@ class VectorizedEngine:
             final_price = prices[-1]
             cash_flow, cost, pnl = self._close_position(current_position, final_price)
             cash += cash_flow - cost
+            # FIND-001 fix (2026-05-14): emit Trade(side=FLAT) atomically with trade_pnls.append.
+            # Pre-fix: only trade_pnls.append fired; zero_dte.py silent break masked the orphan.
+            # See DESIGN_CLUSTER_D1_E_2026_05_14.md §3.1 + VALIDATION_FINDINGS_2026_05_14.md FIND-001.
+            trades.append(
+                Trade(
+                    index=n - 1,
+                    side=TradeSide.FLAT,
+                    price=final_price,
+                    size=current_position.size,
+                    cost=cost,
+                )
+            )
             # P2 FIX: Include entry cost in trade_pnls
             trade_pnls.append(pnl - cost - current_position.entry_cost)
             equity[-1] = cash
+            # hft-rules §8 observability — auto-close should not be silent
+            logger.warning(
+                "Engine fabricated end-of-data close at bar=%d; strategy did not signal EXIT. "
+                "size=%g, price=%.4f, cost=%.4f. Strategies that want signal-driven exit should "
+                "emit Trade(side=FLAT) explicitly. See FIND-001.",
+                n - 1,
+                current_position.size,
+                final_price,
+                cost,
+            )
 
         # Compute returns
         returns = np.diff(equity) / equity[:-1]

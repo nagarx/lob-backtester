@@ -378,3 +378,56 @@ class TestBacktestResult:
         assert "Final Equity" in summary
         assert "Total Return" in summary
 
+
+class TestBacktestResultRoundTripInvariant:
+    """FIND-002 lock tests: BacktestResult.__post_init__ enforces P2 round-trip pairing.
+
+    Contract: each closed round-trip = 1 entry trade (BUY|SELL) + 1 exit trade (FLAT) + 1 P&L.
+    Pre-2026-05-14 the contract was documented at types.py:194-200 but never enforced.
+
+    See DESIGN_CLUSTER_D1_E_2026_05_14.md §3.2 + VALIDATION_FINDINGS_2026_05_14.md FIND-002.
+    """
+
+    def _base_kwargs(self, n: int) -> dict:
+        """Minimal BacktestResult kwargs for an n-bar fixture (positions=np.ndarray per C3)."""
+        return dict(
+            equity_curve=np.array([100.0] * n),
+            returns=np.zeros(n - 1),
+            positions=np.zeros(n),  # np.ndarray — NOT List[Position] (types.py:204 mandate)
+            prices=np.array([10.0] * n),
+            predictions=np.zeros(n),
+            labels=None,
+            metrics={},
+            config_dict={},
+            initial_capital=100.0,
+            final_equity=100.0,
+            start_index=0,
+            end_index=n - 1,
+        )
+
+    def test_post_init_pairing_invariant_satisfied_passes(self):
+        """1 FLAT trade + 1 trade_pnl → invariant holds; construction succeeds."""
+        result = BacktestResult(
+            trades=[
+                Trade(index=0, side=TradeSide.BUY, price=10.0, size=10, cost=0.1),
+                Trade(index=1, side=TradeSide.FLAT, price=10.5, size=10, cost=0.1),
+            ],
+            trade_pnls=np.array([4.8]),  # 1 closed round-trip
+            total_trades=2,
+            **self._base_kwargs(n=2),
+        )
+        assert len(result.trade_pnls) == 1
+
+    def test_post_init_pairing_invariant_violated_raises(self):
+        """1 BUY trade (no FLAT) + 1 trade_pnl → 0 FLAT trades vs 1 pnl → raises."""
+        with pytest.raises(ValueError, match="P2 round-trip pairing contract"):
+            BacktestResult(
+                trades=[
+                    Trade(index=0, side=TradeSide.BUY, price=10.0, size=10, cost=0.1),
+                    # MISSING: Trade(side=TradeSide.FLAT, ...)
+                ],
+                trade_pnls=np.array([4.8]),  # 1 pnl but 0 FLAT trades
+                total_trades=1,
+                **self._base_kwargs(n=2),
+            )
+

@@ -9,12 +9,15 @@ Tests verify:
 - Edge cases
 """
 
+import logging
+
 import numpy as np
 import pytest
 
 from lobbacktest.config import BacktestConfig, CostConfig
 from lobbacktest.engine.vectorized import Backtester, BacktestData, VectorizedEngine
 from lobbacktest.strategies.direction import DirectionStrategy
+from lobbacktest.types import TradeSide
 
 
 class TestBacktestData:
@@ -442,4 +445,55 @@ class TestBacktester:
 
         assert result is not None
         assert len(result.equity_curve) == 3
+
+
+class TestEndOfDataAutoClose:
+    """FIND-001 lock tests: engine auto-close on EOF open position must emit Trade(FLAT)."""
+
+    def test_end_of_data_auto_close_emits_trade(self, caplog):
+        """FIND-001 lock test: auto-close on open position at EOF must emit Trade(FLAT) + WARN log.
+
+        Pre-2026-05-14: auto-close at vectorized.py:436-442 appended trade_pnls but skipped
+        trades.append → ZeroDtePnLTransformer silently dropped final round-trip via the silent
+        break at zero_dte.py:269.
+
+        See DESIGN_CLUSTER_D1_E_2026_05_14.md §3.1 + VALIDATION_FINDINGS_2026_05_14.md FIND-001.
+        """
+        # 3-bar always-in BUY strategy: open at bar 0, hold, never close via signal.
+        # Engine must auto-close at bar n - 1 and emit Trade(side=FLAT).
+        prices = np.array([100.0, 101.0, 102.0])
+        predictions = np.array([1, 1, 1])  # BUY/BUY/BUY (unshifted mapping {-1, 0, 1})
+
+        config = BacktestConfig(
+            initial_capital=10_000.0,
+            position_size=0.1,  # 10% per trade — well within max_position default
+            costs=CostConfig(spread_bps=0.0, slippage_bps=0.0, commission_per_trade=0.0),
+        )
+        data = BacktestData(prices=prices)
+        strategy = DirectionStrategy(predictions, shifted=False)
+
+        engine = VectorizedEngine(config)
+
+        with caplog.at_level(logging.WARNING, logger="lobbacktest.engine.vectorized"):
+            result = engine.run(data, strategy)
+
+        # FIND-001: trades has 2 entries (1 BUY entry + 1 FLAT auto-close), not 1
+        assert len(result.trades) == 2, (
+            f"FIND-001: expected 2 trades (BUY entry + FLAT auto-close); got "
+            f"{len(result.trades)}: {[(t.index, t.side.name) for t in result.trades]}"
+        )
+
+        # Auto-close emits canonical FLAT side at the last bar (n - 1)
+        assert result.trades[-1].side == TradeSide.FLAT
+        assert result.trades[-1].price == 102.0
+        assert result.trades[-1].index == 2  # n - 1 = len(prices) - 1
+
+        # WARN log emitted with required context (hft-rules §8 observability)
+        assert any(
+            "fabricated end-of-data close" in record.message for record in caplog.records
+        ), "FIND-001 fix must emit WARN log per hft-rules §8 observability"
+
+        # FIND-002: __post_init__ invariant satisfied (1 FLAT trade == 1 trade_pnl).
+        # If invariant fails, result construction would have raised before this line.
+        assert len(result.trade_pnls) == 1
 

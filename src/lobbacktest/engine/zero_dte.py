@@ -32,7 +32,7 @@ from typing import List, Optional
 import numpy as np
 
 from lobbacktest.config import ZeroDteConfig, OpraCalibratedCosts
-from lobbacktest.types import BacktestResult, Trade
+from lobbacktest.types import BacktestResult, Trade, TradeSide
 
 
 EPS = 1e-12
@@ -198,6 +198,18 @@ class ZeroDteResult:
         return "\n".join(lines)
 
 
+class ZeroDteAlternationError(ValueError):
+    """Raised when ZeroDtePnLTransformer detects a violated alternation contract.
+
+    The transformer requires strict [open, close, open, close, ...] alternation in trades:
+    entries (sides BUY|SELL) at even indices, exits (side FLAT) at odd indices.
+    Post-FIND-001 fix this is structurally guaranteed by the engine; this exception is
+    reserved for future regression detection or external Trade-stream consumers.
+
+    See ``DESIGN_CLUSTER_D1_E_2026_05_14.md`` §3.3 + ``VALIDATION_FINDINGS_2026_05_14.md`` FIND-003.
+    """
+
+
 class ZeroDtePnLTransformer:
     """
     Transforms equity backtest trades into IBKR+OPRA-calibrated 0DTE option P&L.
@@ -250,6 +262,21 @@ class ZeroDtePnLTransformer:
                 config=self.config,
             )
 
+        # FIND-003 fix (2026-05-14): alternation contract precondition.
+        # Post-FIND-001 fix, engine emits Trade(FLAT) symmetrically with trade_pnls.append.
+        # Contract: each closed round-trip = 1 entry trade (BUY|SELL) + 1 exit trade (FLAT).
+        # Therefore len(trades) MUST equal 2 * n_round_trips. Per hft-rules §5 fail-fast.
+        # See DESIGN_CLUSTER_D1_E_2026_05_14.md §3.3 + VALIDATION_FINDINGS_2026_05_14.md FIND-003.
+        expected_n_trades = n_round_trips * 2
+        if len(trades) != expected_n_trades:
+            raise ZeroDteAlternationError(
+                f"ZeroDte expects 2 trades per round-trip (open + close); "
+                f"got n_round_trips={n_round_trips} (from len(equity_pnls)) "
+                f"but len(trades)={len(trades)}, expected {expected_n_trades}. "
+                f"Engine should emit Trade(side=FLAT) symmetrically with trade_pnls.append. "
+                f"See FIND-001/FIND-002/FIND-003 cluster."
+            )
+
         oc = self.config.opra_costs
         contracts = self.config.contracts_per_trade
         delta = self.config.delta
@@ -266,11 +293,25 @@ class ZeroDtePnLTransformer:
         for i in range(n_round_trips):
             entry_idx = i * 2
             exit_idx = i * 2 + 1
-            if exit_idx >= len(trades):
-                break
+            # FIND-003 fix (2026-05-14): the precondition above guarantees
+            # len(trades) == 2 * n_round_trips, so exit_idx < len(trades) is
+            # structurally guaranteed. The pre-2026-05-14 silent ``break`` here
+            # was hiding FIND-001 by truncating option-mode round-trips whenever
+            # the engine left an open EOF position. Replaced with explicit
+            # per-pair alternation assert below (catches reordering bugs +
+            # future regressions). See FIND-003.
 
             entry_trade = trades[entry_idx]
             exit_trade = trades[exit_idx]
+
+            # FIND-003: per-pair alternation assert
+            if entry_trade.side == TradeSide.FLAT or exit_trade.side != TradeSide.FLAT:
+                raise ZeroDteAlternationError(
+                    f"ZeroDte alternation violated at round-trip {i}: "
+                    f"entry@{entry_idx}.side={entry_trade.side.name}, "
+                    f"exit@{exit_idx}.side={exit_trade.side.name}. "
+                    f"Expected entry in {{BUY, SELL}} + exit == FLAT."
+                )
 
             is_call = entry_trade.side.value > 0 if self.config.prefer_calls else entry_trade.side.value < 0
             is_call_arr[i] = is_call

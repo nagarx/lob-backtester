@@ -204,18 +204,24 @@ class AverageWin(Metric):
             {"AverageWin": average_win}
 
         Edge cases:
-            - No winning trades: 0.0
+            - Empty trade list: NaN (FIND-024 EXT 2026-05-15; was 0.0)
+            - No winning trades: NaN (FIND-024 EXT 2026-05-15; was 0.0)
+
+        Notes (FIND-024 EXT 2026-05-15): empty trade list and no-winners both
+        return NaN mirroring Phase X.3 WinRate precedent at L79. Indistinguishable
+        zero from legitimate "avg-winner-is-zero" pre-fix per hft-rules §8.
+        Note: zero P&L is not counted as winning (strict `> 0`).
         """
         trade_pnls = context.get("trade_pnls", np.array([]))
 
         if len(trade_pnls) == 0:
-            return {self.name: 0.0}
+            return {self.name: float("nan")}
 
         trade_pnls = np.asarray(trade_pnls)
         winning = trade_pnls[trade_pnls > 0]
 
         if len(winning) == 0:
-            return {self.name: 0.0}
+            return {self.name: float("nan")}
 
         avg_win = np.mean(winning)
 
@@ -265,18 +271,23 @@ class AverageLoss(Metric):
             {"AverageLoss": average_loss} (positive value)
 
         Edge cases:
-            - No losing trades: 0.0
+            - Empty trade list: NaN (FIND-024 EXT 2026-05-15; was 0.0)
+            - No losing trades: NaN (FIND-024 EXT 2026-05-15; was 0.0)
+
+        Notes (FIND-024 EXT 2026-05-15): empty trade list and no-losers both
+        return NaN mirroring Phase X.3 WinRate precedent at L79. Indistinguishable
+        zero from legitimate "avg-loser-is-zero" pre-fix per hft-rules §8.
         """
         trade_pnls = context.get("trade_pnls", np.array([]))
 
         if len(trade_pnls) == 0:
-            return {self.name: 0.0}
+            return {self.name: float("nan")}
 
         trade_pnls = np.asarray(trade_pnls)
         losing = trade_pnls[trade_pnls < 0]
 
         if len(losing) == 0:
-            return {self.name: 0.0}
+            return {self.name: float("nan")}
 
         avg_loss = np.abs(np.mean(losing))
 
@@ -334,8 +345,12 @@ class PayoffRatio(Metric):
             {"PayoffRatio": payoff_ratio}
 
         Edge cases:
-            - No losing trades: 100.0 (capped)
-            - No winning trades: 0.0
+            - Empty trade list: NaN (FIND-024 EXT 2026-05-15; was 0.0)
+            - No losing trades, has winners: 100.0 (capped; documented sentinel
+              for "infinite reward-to-risk"; see #PY-FIND-024-EXT for future
+              migration to math.inf vs NaN decision cycle)
+            - No winning trades: 0.0 (legitimate; PayoffRatio undefined when
+              avg_win=0; 0.0 mathematically equals 0/avg_loss)
         """
         # Get or compute average win/loss
         if "AverageWin" in context and "AverageLoss" in context:
@@ -344,7 +359,7 @@ class PayoffRatio(Metric):
         else:
             trade_pnls = context.get("trade_pnls", np.array([]))
             if len(trade_pnls) == 0:
-                return {self.name: 0.0}
+                return {self.name: float("nan")}
 
             trade_pnls = np.asarray(trade_pnls)
             winning = trade_pnls[trade_pnls > 0]
@@ -410,11 +425,19 @@ class Expectancy(Metric):
 
         Returns:
             {"Expectancy": expectancy}
+
+        Edge cases:
+            - Empty trade list: NaN (FIND-024 EXT 2026-05-15; was 0.0)
+
+        Notes (FIND-024 EXT 2026-05-15): empty trade list returns NaN mirroring
+        Phase X.3 WinRate precedent at L79. NaN propagates naturally through
+        the formula when WinRate/AverageWin/AverageLoss are NaN from context
+        (sister metrics also migrated to NaN sentinel per FIND-024 EXT).
         """
         # Get or compute components
         trade_pnls = context.get("trade_pnls", np.array([]))
         if len(trade_pnls) == 0:
-            return {self.name: 0.0}
+            return {self.name: float("nan")}
 
         trade_pnls = np.asarray(trade_pnls)
 

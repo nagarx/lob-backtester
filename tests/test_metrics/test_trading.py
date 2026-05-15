@@ -167,13 +167,33 @@ class TestAverageWin:
         assert abs(result["AverageWin"] - expected) < 1e-10
 
     def test_average_win_no_wins(self):
-        """Test handling of no winning trades."""
+        """Test handling of no winning trades.
+
+        FIND-024 EXT (2026-05-15): no-winners returns NaN (was 0.0 pre-fix).
+        Mirrors Phase X.3 WinRate precedent at trading.py:79. Per hft-rules
+        §8 — 0.0 was indistinguishable from legitimate "avg-winner-is-zero".
+        """
+        import math
         trade_pnls = np.array([-10, -20, -30])
         context = {"trade_pnls": trade_pnls}
 
         metric = AverageWin()
         result = metric.compute(np.array([]), context)
-        assert result["AverageWin"] == 0.0
+        assert math.isnan(result["AverageWin"])
+
+    def test_average_win_no_trades(self):
+        """Test handling of empty trade list (FIND-024 EXT 2026-05-15).
+
+        Empty trade_pnls returns NaN mirroring Phase X.3 WinRate precedent
+        at trading.py:79. Per hft-rules §8 — silent 0.0 pre-fix was
+        indistinguishable from "average winning trade is zero".
+        """
+        import math
+        context = {"trade_pnls": np.array([])}
+
+        metric = AverageWin()
+        result = metric.compute(np.array([]), context)
+        assert math.isnan(result["AverageWin"])
 
 
 class TestAverageLoss:
@@ -195,13 +215,33 @@ class TestAverageLoss:
         assert abs(result["AverageLoss"] - expected) < 1e-10
 
     def test_average_loss_no_losses(self):
-        """Test handling of no losing trades."""
+        """Test handling of no losing trades.
+
+        FIND-024 EXT (2026-05-15): no-losers returns NaN (was 0.0 pre-fix).
+        Mirrors Phase X.3 WinRate precedent at trading.py:79. Per hft-rules
+        §8 — 0.0 was indistinguishable from legitimate "avg-loser-is-zero".
+        """
+        import math
         trade_pnls = np.array([10, 20, 30])
         context = {"trade_pnls": trade_pnls}
 
         metric = AverageLoss()
         result = metric.compute(np.array([]), context)
-        assert result["AverageLoss"] == 0.0
+        assert math.isnan(result["AverageLoss"])
+
+    def test_average_loss_no_trades(self):
+        """Test handling of empty trade list (FIND-024 EXT 2026-05-15).
+
+        Empty trade_pnls returns NaN mirroring Phase X.3 WinRate precedent
+        at trading.py:79. Per hft-rules §8 — silent 0.0 pre-fix was
+        indistinguishable from "average losing trade is zero".
+        """
+        import math
+        context = {"trade_pnls": np.array([])}
+
+        metric = AverageLoss()
+        result = metric.compute(np.array([]), context)
+        assert math.isnan(result["AverageLoss"])
 
 
 class TestPayoffRatio:
@@ -223,12 +263,32 @@ class TestPayoffRatio:
         assert abs(result["PayoffRatio"] - expected) < 1e-10
 
     def test_payoff_ratio_no_losses(self):
-        """Test capped value when no losses."""
+        """Test capped value when no losses.
+
+        FIND-024 EXT (2026-05-15): L358 magic 100.0 cap PRESERVED as
+        documented sentinel for "infinite reward-to-risk" semantic.
+        Migration to math.inf vs NaN deferred to #PY-FIND-024-EXT cycle.
+        """
         context = {"AverageWin": 20.0, "AverageLoss": 0.0}
 
         metric = PayoffRatio()
         result = metric.compute(np.array([]), context)
         assert result["PayoffRatio"] == 100.0
+
+    def test_payoff_ratio_no_trades(self):
+        """Test handling of empty trade list (FIND-024 EXT 2026-05-15).
+
+        Empty trade_pnls returns NaN at trading.py:347 (was 0.0 pre-fix).
+        Mirrors Phase X.3 WinRate precedent. Per hft-rules §8 — silent 0.0
+        pre-fix was indistinguishable from "no winning trades, only losers
+        path produces 0/avg_loss = 0.0" semantic.
+        """
+        import math
+        context = {"trade_pnls": np.array([])}
+
+        metric = PayoffRatio()
+        result = metric.compute(np.array([]), context)
+        assert math.isnan(result["PayoffRatio"])
 
 
 class TestExpectancy:
@@ -271,4 +331,19 @@ class TestExpectancy:
         metric = Expectancy()
         result = metric.compute(np.array([]), context)
         assert result["Expectancy"] < 0
+
+    def test_expectancy_no_trades(self):
+        """Test handling of empty trade list (FIND-024 EXT 2026-05-15).
+
+        Empty trade_pnls returns NaN at trading.py:417 (was 0.0 pre-fix).
+        Mirrors Phase X.3 WinRate precedent. Per hft-rules §8 — silent 0.0
+        pre-fix was indistinguishable from "perfectly balanced expectancy
+        = 0 from neutral system" semantic.
+        """
+        import math
+        context = {"trade_pnls": np.array([])}
+
+        metric = Expectancy()
+        result = metric.compute(np.array([]), context)
+        assert math.isnan(result["Expectancy"])
 

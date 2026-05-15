@@ -273,3 +273,56 @@ class TestRegressionDefaults:
         # Internally, pred_class should use 1 and -1, not 2 and 0
         assert strategy.label_mapping.up == 1
         assert strategy.label_mapping.down == -1
+
+
+class TestRegressionNaNGuards:
+    """Tests for FIND-046 + #PY-71 NaN guard discipline (2026-05-15).
+
+    Pre-fix: `abs(NaN) < float` and `NaN > float` both evaluated False (IEEE
+    754 NaN-comparison invariant), allowing NaN inputs to PASS gates silently
+    and trigger trades on garbage signals. Per hft-rules §8 fail-closed.
+    """
+
+    def test_nan_prediction_rejected(self):
+        """NaN predicted return must REJECT entry (regression.py:99 — FIND-046).
+
+        Pre-fix `abs(NaN) < min_return_bps` returned False → gate continued →
+        BUY/SELL emitted on NaN prediction.
+        """
+        n = 15
+        predicted = np.full(n, 8.0)  # All above threshold
+        predicted[0] = np.nan
+        spreads = np.full(n, 0.8)
+        prices = np.linspace(100, 101, n)
+        config = RegressionStrategyConfig(min_return_bps=5.0)
+        strategy = RegressionStrategy(
+            predicted_returns=predicted, spreads=spreads,
+            prices=prices, config=config,
+            holding_policy=HorizonAlignedPolicy(5),
+        )
+        output = strategy.generate_signals(prices)
+        # NaN at index 0 must NOT trigger entry; gate fail-closed → HOLD
+        assert output.signals[0] == Signal.HOLD, (
+            f"NaN prediction should fail-closed; got {output.signals[0]}"
+        )
+
+    def test_nan_spread_rejected(self):
+        """NaN spread must REJECT entry (regression.py:102 — #PY-71 sister).
+
+        Pre-fix `NaN > max_spread_bps` returned False → gate continued.
+        """
+        n = 15
+        predicted = np.full(n, 8.0)
+        spreads = np.full(n, 0.8)
+        spreads[0] = np.nan
+        prices = np.linspace(100, 101, n)
+        config = RegressionStrategyConfig(min_return_bps=5.0, max_spread_bps=1.0)
+        strategy = RegressionStrategy(
+            predicted_returns=predicted, spreads=spreads,
+            prices=prices, config=config,
+            holding_policy=HorizonAlignedPolicy(5),
+        )
+        output = strategy.generate_signals(prices)
+        assert output.signals[0] == Signal.HOLD, (
+            f"NaN spread should fail-closed; got {output.signals[0]}"
+        )

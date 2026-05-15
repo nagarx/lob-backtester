@@ -368,3 +368,73 @@ class TestReadabilityDefaults:
         assert output.signals[1] == Signal.BUY, (
             f"Agreement 0.668 >= 0.667 should be BUY, got {output.signals[1]}"
         )
+
+
+class TestReadabilityNaNGuards:
+    """Tests for #PY-71 NaN guard discipline (2026-05-15).
+
+    Pre-fix: `value <op> threshold` evaluated False on NaN (IEEE 754
+    NaN-comparison invariant) → gate PASSED on NaN → trade on garbage.
+    Fail-closed: NaN input → gate REJECTS the signal.
+    """
+
+    def test_nan_agreement_rejected(self):
+        """NaN agreement_ratio must REJECT entry (readability.py:119)."""
+        predictions, agreement, confirmation, spreads, prices = _make_readability_data(n=10)
+        agreement[0] = np.nan
+        config = ReadabilityConfig(min_agreement=1.0, min_confidence=0.65)
+        strategy = ReadabilityStrategy(
+            predictions=predictions, agreement_ratio=agreement,
+            confirmation_score=confirmation, spreads=spreads,
+            prices=prices, config=config,
+        )
+        output = strategy.generate_signals(prices)
+        assert output.signals[0] == Signal.HOLD, (
+            f"NaN agreement should fail-closed; got {output.signals[0]}"
+        )
+
+    def test_nan_confidence_rejected(self):
+        """NaN confirmation_score must REJECT entry (readability.py:121)."""
+        predictions, agreement, confirmation, spreads, prices = _make_readability_data(n=10)
+        confirmation[0] = np.nan
+        config = ReadabilityConfig(min_agreement=1.0, min_confidence=0.65)
+        strategy = ReadabilityStrategy(
+            predictions=predictions, agreement_ratio=agreement,
+            confirmation_score=confirmation, spreads=spreads,
+            prices=prices, config=config,
+        )
+        output = strategy.generate_signals(prices)
+        assert output.signals[0] == Signal.HOLD, (
+            f"NaN confidence should fail-closed; got {output.signals[0]}"
+        )
+
+    def test_nan_spread_rejected(self):
+        """NaN spread must REJECT entry (readability.py:124)."""
+        predictions, agreement, confirmation, spreads, prices = _make_readability_data(n=10)
+        spreads[0] = np.nan
+        config = ReadabilityConfig(max_spread_bps=1.0)
+        strategy = ReadabilityStrategy(
+            predictions=predictions, agreement_ratio=agreement,
+            confirmation_score=confirmation, spreads=spreads,
+            prices=prices, config=config,
+        )
+        output = strategy.generate_signals(prices)
+        assert output.signals[0] == Signal.HOLD, (
+            f"NaN spread should fail-closed; got {output.signals[0]}"
+        )
+
+    def test_nan_volatility_rejected(self):
+        """NaN volatility must REJECT entry (readability.py:130 — NEW Agent J)."""
+        predictions, agreement, confirmation, spreads, prices = _make_readability_data(n=10)
+        volatility = np.full(10, 0.5, dtype=np.float64)
+        volatility[0] = np.nan
+        config = ReadabilityConfig(min_volatility=0.1)
+        strategy = ReadabilityStrategy(
+            predictions=predictions, agreement_ratio=agreement,
+            confirmation_score=confirmation, spreads=spreads,
+            prices=prices, config=config, volatility=volatility,
+        )
+        output = strategy.generate_signals(prices)
+        assert output.signals[0] == Signal.HOLD, (
+            f"NaN volatility should fail-closed; got {output.signals[0]}"
+        )

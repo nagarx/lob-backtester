@@ -254,3 +254,36 @@ class TestSignalOutput:
         with pytest.raises(ValueError, match="must be 1D"):
             SignalOutput(signals=signals)
 
+
+class TestThresholdStrategyNaNGuard:
+    """Tests for HF-3 NaN guard discipline (2026-05-15).
+
+    Pre-fix: `np.max(NaN-array)` returns NaN; `NaN < threshold` evaluates
+    False (IEEE 754 NaN-comparison invariant), allowing fall-through to
+    pred-based BUY/SELL on garbage softmax outputs. Force HOLD per
+    hft-rules §8 fail-closed.
+    """
+
+    def test_nan_max_prob_holds_online_mode(self):
+        """NaN max_prob in online mode must emit HOLD (direction.py:222).
+
+        Simulates model numerical instability producing NaN in softmax output.
+        Pre-fix would have fallen through to pred-based BUY/SELL.
+        """
+        predictions = np.array([LABEL_UP, LABEL_DOWN])
+        # NaN softmax probability simulates model overflow/underflow
+        probabilities = np.array([
+            [np.nan, 0.5, 0.5],
+            [0.3, 0.4, 0.3],
+        ])
+        prices = np.array([100.0, 101.0])
+
+        strategy = ThresholdStrategy(
+            predictions=predictions, probabilities=probabilities,
+            threshold=0.5, shifted=False,
+        )
+        output = strategy.generate_signals(prices, index=0)
+        assert output.signals[0] == Signal.HOLD, (
+            f"NaN max_prob should emit HOLD (fail-closed); got {output.signals[0]}"
+        )
+

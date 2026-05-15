@@ -115,19 +115,30 @@ class ReadabilityStrategy(Strategy):
         )
 
     def _check_entry_gate(self, i: int) -> bool:
-        """Check if event i passes all readability gates for entry."""
-        if self.agreement_ratio[i] < self.config.min_agreement:
+        """Check if event i passes all readability gates for entry.
+
+        #PY-71 (2026-05-15): added np.isfinite guards to comparison gates.
+        Pre-fix `value <op> threshold` evaluated False on NaN input (IEEE 754
+        NaN-comparison invariant), allowing NaN signals (agreement, confidence,
+        spread, volatility) to PASS gates silently and trigger trades on
+        garbage. Per hft-rules §8. Fail-closed: NaN input → return False.
+        """
+        agreement = self.agreement_ratio[i]
+        if not np.isfinite(agreement) or agreement < self.config.min_agreement:
             return False
-        if self.confirmation_score[i] <= self.config.min_confidence:
+        confidence = self.confirmation_score[i]
+        if not np.isfinite(confidence) or confidence <= self.config.min_confidence:
             return False
         if self.spreads is not None and self.config.max_spread_bps > 0:
-            if self.spreads[i] > self.config.max_spread_bps:
+            spread = self.spreads[i]
+            if not np.isfinite(spread) or spread > self.config.max_spread_bps:
                 return False
         if self.config.require_directional:
             if not self.label_mapping.is_directional(int(self.predictions[i])):
                 return False
         if self.config.min_volatility is not None and self.volatility is not None:
-            if self.volatility[i] < self.config.min_volatility:
+            vol = self.volatility[i]
+            if not np.isfinite(vol) or vol < self.config.min_volatility:
                 return False
         return True
 

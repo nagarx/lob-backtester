@@ -112,7 +112,15 @@ class TWAPStrategy(Strategy):
                 events_since_start = i - twap_start
 
                 if events_since_start < k:
-                    if self.spreads is not None and self.spreads[i] > self.config.max_spread_bps:
+                    # #PY-71 (2026-05-15): np.isfinite guard for NaN spread.
+                    # Pre-fix `NaN > max_spread_bps` evaluated False (IEEE 754
+                    # NaN-comparison), routing NaN-spread to the count-entry
+                    # branch. Force route to non-count branch per fail-closed
+                    # discipline. Per hft-rules §8.
+                    if self.spreads is not None and (
+                        not np.isfinite(self.spreads[i])
+                        or self.spreads[i] > self.config.max_spread_bps
+                    ):
                         signals[i] = Signal.BUY if twap_direction == 1 else Signal.SELL
                     else:
                         signals[i] = Signal.BUY if twap_direction == 1 else Signal.SELL
@@ -129,9 +137,16 @@ class TWAPStrategy(Strategy):
                     continue
 
                 pred = self.predictions_bps[i]
-                if abs(pred) < self.config.min_return_bps:
+                # #PY-71 (2026-05-15): np.isfinite guards for NaN pred + spread.
+                # Pre-fix `abs(NaN) < float` and `NaN > float` both evaluated
+                # False (IEEE 754 NaN-comparison), allowing NaN inputs to PASS
+                # both gates silently. Per hft-rules §8 fail-closed.
+                if not np.isfinite(pred) or abs(pred) < self.config.min_return_bps:
                     continue
-                if self.spreads is not None and self.spreads[i] > self.config.max_spread_bps:
+                if self.spreads is not None and (
+                    not np.isfinite(self.spreads[i])
+                    or self.spreads[i] > self.config.max_spread_bps
+                ):
                     continue
 
                 if i + k >= n:

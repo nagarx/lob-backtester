@@ -95,11 +95,20 @@ class RegressionStrategy(Strategy):
         )
 
     def _check_entry_gate(self, i: int) -> bool:
-        """Check if event i passes all entry gates."""
-        if abs(self.predictions_bps[i]) < self.config.min_return_bps:
+        """Check if event i passes all entry gates.
+
+        FIND-046 + #PY-71 (2026-05-15): added np.isfinite guards.
+        Pre-fix `abs(NaN) < float` evaluated False (IEEE 754 NaN-comparison
+        invariant), allowing NaN predictions to PASS the magnitude gate
+        silently and trigger trades on garbage signals. Per hft-rules §8.
+        Fail-closed: NaN input → return False (gate REJECTS the signal).
+        """
+        pred = self.predictions_bps[i]
+        if not np.isfinite(pred) or abs(pred) < self.config.min_return_bps:
             return False
         if self.spreads is not None and self.config.max_spread_bps > 0:
-            if self.spreads[i] > self.config.max_spread_bps:
+            spread = self.spreads[i]
+            if not np.isfinite(spread) or spread > self.config.max_spread_bps:
                 return False
         return True
 

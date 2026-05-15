@@ -219,7 +219,14 @@ class ThresholdStrategy(Strategy):
             prob = self.probabilities[index]
             max_prob = np.max(prob)
 
-            if max_prob < self.threshold:
+            # HF-3 (2026-05-15): np.isfinite guard for NaN max_prob.
+            # Pre-fix when softmax prob array contains NaN, `np.max` returns
+            # NaN; `NaN < threshold` evaluates False (IEEE 754 NaN-comparison),
+            # allowing fall-through to pred-based BUY/SELL on garbage softmax
+            # output. Force HOLD on non-finite probability per hft-rules §8
+            # fail-closed. NOTE: batch mode at L258 uses `>=` which is
+            # already SAFE on NaN (NaN >= threshold returns False → HOLD).
+            if not np.isfinite(max_prob) or max_prob < self.threshold:
                 signal = Signal.HOLD
             elif pred == self.label_up:
                 signal = Signal.BUY

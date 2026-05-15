@@ -33,6 +33,13 @@ from pathlib import Path
 
 import numpy as np
 
+# Added 2026-05-15 R-19 cycle C5: atomic-write SSoT for FIND-090
+# sister-site closure at L349 (hft-ops ledger linkage). Mirrors
+# `run_regression_backtest.py` atomic_io pattern. Placed with
+# third-party imports (above sys.path.insert) since hft_contracts is
+# a pip-installed sibling package, NOT a path-shim'd local sibling.
+from hft_contracts.atomic_io import atomic_write_json
+
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from lobbacktest.config import BacktestConfig, CostConfig, ZeroDteConfig, OpraCalibratedCosts
@@ -346,10 +353,21 @@ def main():
                     "manifest": str(manifest_path),
                 }
                 record_path = ledger_path / f"{manifest_exp_name}_backtest_{args.name}.json"
-                with open(record_path, "w") as f:
-                    json.dump(record, f, indent=2, default=str)
+                # FIND-090 sister-site closure (2026-05-15 R-19 cycle C5):
+                # atomic-write SSoT for cross-repo hft-ops ledger linkage.
+                # SIGKILL mid-write here corrupts hft-ops ledger state.
+                # `sort_keys=True` matches hft-ops SSoT convention.
+                # atomic_write_json honors datetime/Enum/Path via internal
+                # default=str (per atomic_io.py:191 docstring) — drop-in
+                # compatible with pre-fix `default=str` kwarg.
+                atomic_write_json(record_path, record, sort_keys=True, indent=2)
                 print(f"  Updated hft-ops ledger: {record_path}")
         except Exception as e:
+            # NOTE: bare `except Exception` catches `AtomicWriteError` from
+            # hft_contracts.atomic_io. Narrower exception tuple (matching
+            # run_regression_backtest.py:464 pattern) is OUT OF SCOPE for
+            # C5 — broad-except is pre-existing behavior; tightening is a
+            # separate hft-rules §8 hygiene cycle.
             print(f"  WARNING: Failed to update hft-ops ledger: {e}")
 
     print(f"\n{'='*60}")

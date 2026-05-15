@@ -28,7 +28,15 @@ import numpy as np
 # match the atomic-write discipline shipped in #PY-73 closure (2026-05-11).
 # Placed with third-party imports (above sys.path.insert) since hft_contracts
 # is a pip-installed sibling package, NOT a path-shim'd local sibling.
-from hft_contracts.atomic_io import atomic_write_npy
+# Extended 2026-05-15 R-19 cycle C5: atomic_write_json + AtomicWriteError
+# additions close FIND-090 sister-site hazards at L374 (summary JSON) +
+# L460 (hft-ops ledger linkage). atomic_write_npy retained for R-16c F1
+# per-trade dump.
+from hft_contracts.atomic_io import (
+    AtomicWriteError,
+    atomic_write_json,
+    atomic_write_npy,
+)
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -371,8 +379,18 @@ def main():
               f"{opt_wr:>6.2f}% {opt_ret:>+7.2f}%")
 
     output_file = output_dir / f"{args.name}.json"
-    with open(output_file, "w") as f:
-        json.dump({
+    # FIND-090 sister-site closure (2026-05-15 R-19 cycle C5):
+    # atomic-write SSoT for operator-facing per-script summary JSON.
+    # Pre-fix `open + json.dump` was SIGKILL-corrupt: a crash mid-write
+    # would leave a partial summary that downstream operator tools
+    # (manual ledger browse, comparison scripts) read as truncated JSON
+    # → JSONDecodeError or silently-wrong field values. `sort_keys=False`
+    # preserves operator-friendly field order (name + exchange + paths
+    # lead; results last). NOT content-addressable; matches L84
+    # sort_keys rationale in registry.py.
+    atomic_write_json(
+        output_file,
+        {
             "name": args.name,
             "exchange": args.exchange,
             "signal_dir": str(signal_dir),
@@ -380,7 +398,10 @@ def main():
             "holding_policy": holding_policy.policy_name,
             "zero_dte_enabled": args.zero_dte,
             "results": all_results,
-        }, f, indent=2)
+        },
+        sort_keys=False,
+        indent=2,
+    )
     print(f"\n  Saved results to {output_file}")
 
     # Phase R-17 F1 (2026-05-11): #PY-129 producer-side ledger linkage.
@@ -457,11 +478,20 @@ def main():
                     "manifest": str(manifest_path),
                 }
                 record_path = ledger_path / f"{manifest_exp_name}_backtest_{args.name}.json"
-                with open(record_path, "w") as f:
-                    json.dump(record, f, indent=2)
+                # FIND-090 sister-site closure (2026-05-15 R-19 cycle C5):
+                # atomic-write SSoT for cross-repo hft-ops ledger linkage.
+                # SIGKILL mid-write here corrupts hft-ops ledger state
+                # consumed by `hft-ops ledger list` queries +
+                # `compare_experiments` workflow. `sort_keys=True` matches
+                # hft-ops SSoT convention (canonical default per
+                # atomic_io.py:38-44 "deterministic key order for diff
+                # tooling, content addressing, and cross-run byte
+                # equality").
+                atomic_write_json(record_path, record, sort_keys=True, indent=2)
                 print(f"  Updated hft-ops ledger: {record_path}")
         except (FileNotFoundError, PermissionError, OSError, KeyError,
-                AttributeError, TypeError, _yaml.YAMLError) as e:
+                AttributeError, TypeError, _yaml.YAMLError,
+                AtomicWriteError) as e:
             # Narrow exception set per hft-rules §8 — re-raise unexpected types.
             # Phase R-17 v2 mid-impl refinement (Q3): added AttributeError +
             # TypeError to handle realistic chains like

@@ -172,6 +172,56 @@ class TestFind093UtcTimestamps:
         )
 
 
+class TestFind093SpreadScriptUtc:
+    """FIND-093: scripts/run_spread_signal_backtest.py uses datetime.now(timezone.utc).
+
+    Closes Adv X GAP-3 from pre-impl review: the spread-script `analysis_date`
+    site at L562 was migrated to UTC but no regression test locked the
+    discipline. AST-walk over the script source catches future regressions
+    where a contributor adds bare `datetime.now()` (local TZ).
+    """
+
+    def test_spread_script_has_no_bare_datetime_now_calls(self) -> None:
+        """AST: scripts/run_spread_signal_backtest.py has zero `datetime.now()`
+        without `timezone.utc` argument.
+
+        Pattern caught: `datetime.now()` (no args). NOT caught:
+        `datetime.utcnow()` (deprecated; should also be flagged by future
+        Cluster F.x lints). Current script convention is `datetime.now(timezone.utc)`.
+        """
+        import ast
+
+        script_path = (
+            Path(__file__).parent.parent
+            / "scripts"
+            / "run_spread_signal_backtest.py"
+        )
+        if not script_path.exists():
+            pytest.skip(f"script not found at {script_path}")
+
+        tree = ast.parse(script_path.read_text(encoding="utf-8"))
+        bare_calls: list[int] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                # Match `datetime.now(...)` where datetime is a Name (not
+                # an Attribute chain like `dt.datetime.now`).
+                if (
+                    isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "now"
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "datetime"
+                ):
+                    # Bare call has zero args AND zero keywords (no
+                    # `tz=...` keyword)
+                    if not node.args and not node.keywords:
+                        bare_calls.append(node.lineno)
+        assert bare_calls == [], (
+            f"scripts/run_spread_signal_backtest.py has bare "
+            f"datetime.now() (local TZ) at lines {bare_calls} — "
+            f"FIND-093 regression. Use datetime.now(timezone.utc)."
+        )
+
+
 class TestFind090Find093EndToEnd:
     """Combined: register() succeeds + all artifacts atomically written + UTC."""
 

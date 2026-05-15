@@ -142,6 +142,12 @@ class BacktestRegistry:
         # FIND-090 closure: atomic-write JSON for result.json (default=str
         # internal at atomic_write_json:191 honors datetime/Enum/Path values
         # the same as pre-fix json.dump(..., default=str)).
+        #
+        # `sort_keys=False` preserves operator-facing field order
+        # `{run_id, name, created_at, config, metrics, ...}` — see
+        # `_save_index` comment for full SSoT-canonical-deviation
+        # rationale. result.json is a per-run operator artifact, NOT a
+        # byte-stable content-addressable fixture.
         atomic_write_json(run_dir / "result.json", result, sort_keys=False)
 
         # FIND-090 closure: atomic-write YAML via atomic_write_binary +

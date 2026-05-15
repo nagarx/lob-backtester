@@ -14,11 +14,18 @@ Design:
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
+import yaml
+
+# FIND-090 closure (2026-05-15 R-19 cycle bundled fix): registry writes
+# (_save_index, result.json, config.yaml) migrate to atomic SSoT to close
+# SIGKILL-mid-write corruption hazard. Sister of #PY-73 atomic_write_npy
+# already in use at L145-150 for equity_curve.npy.
+from hft_contracts.atomic_io import atomic_write_binary, atomic_write_json
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +73,23 @@ class BacktestRegistry:
                 self._index = json.load(f)
 
     def _save_index(self) -> None:
-        with open(self._index_path, "w") as f:
-            json.dump(self._index, f, indent=2)
+        # FIND-090 closure: atomic-write SSoT (#PY-73 sister; 2026-05-15
+        # R-19 cycle bundled fix). Pre-fix: SIGKILL mid-write of
+        # _index_path corrupts the per-run index lookup, blocking all
+        # subsequent registry.compare() / list_all() queries.
+        #
+        # DELIBERATE deviation from atomic_write_json SSoT canonical
+        # `sort_keys=True` default (hft-contracts/atomic_io.py:38-44):
+        # registry index.json semantically tracks experiments in
+        # TEMPORAL order. Run_ids are `{name}_YYYYMMDD_HHMMSS`, and
+        # operator-facing readers (compare() output, manual ledger
+        # browse) expect insertion order = temporal order. Activating
+        # `sort_keys=True` would alphabetize the entire historical file
+        # on next write — equivalent for same-name runs but cosmetic
+        # churn across different name prefixes. Preserves pre-fix
+        # `json.dump` implicit default. NOT content-addressable, NOT a
+        # golden fixture — exempt from SSoT byte-stability rationale.
+        atomic_write_json(self._index_path, self._index, sort_keys=False)
 
     def register(
         self,
@@ -94,14 +116,22 @@ class BacktestRegistry:
         Returns:
             Run ID for reference.
         """
-        run_id = f"{name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        # FIND-093 closure (2026-05-15 R-19 cycle bundled fix): datetime.now()
+        # without tzinfo returns local-machine TZ → cross-operator reproducibility
+        # break (timestamp comparison across operators with different TZ is
+        # silently inconsistent). Use UTC explicitly per pipeline convention
+        # (hft-contracts.timestamp_utils + Phase A.5.1 ISO-8601 SSoT).
+        # `run_id` uses strftime without tz suffix — UTC value still serializes
+        # deterministically (e.g., "20260515_142030") matching prior format.
+        now_utc = datetime.now(timezone.utc)
+        run_id = f"{name}_{now_utc.strftime('%Y%m%d_%H%M%S')}"
         run_dir = self.base_dir / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
 
         result = {
             "run_id": run_id,
             "name": name,
-            "created_at": datetime.now().isoformat(),
+            "created_at": now_utc.isoformat(),
             "config": config_dict,
             "metrics": metrics,
             "signal_metadata": signal_metadata,
@@ -109,12 +139,16 @@ class BacktestRegistry:
             "option_metrics": option_metrics or {},
         }
 
-        with open(run_dir / "result.json", "w") as f:
-            json.dump(result, f, indent=2, default=str)
+        # FIND-090 closure: atomic-write JSON for result.json (default=str
+        # internal at atomic_write_json:191 honors datetime/Enum/Path values
+        # the same as pre-fix json.dump(..., default=str)).
+        atomic_write_json(run_dir / "result.json", result, sort_keys=False)
 
-        with open(run_dir / "config.yaml", "w") as f:
-            import yaml
-            yaml.dump(config_dict, f, default_flow_style=False)
+        # FIND-090 closure: atomic-write YAML via atomic_write_binary +
+        # bytes-encoding lambda. yaml.dump emits str; encode to bytes for
+        # the BinaryIO file handle.
+        yaml_bytes = yaml.dump(config_dict, default_flow_style=False).encode("utf-8")
+        atomic_write_binary(run_dir / "config.yaml", lambda f: f.write(yaml_bytes))
 
         if equity_curve is not None:
             # #PY-73 atomic write — SIGKILL mid-write would corrupt the

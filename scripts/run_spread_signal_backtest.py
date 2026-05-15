@@ -20,7 +20,7 @@ import json
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -557,7 +557,9 @@ def main():
     # === Run Backtests ===
     all_results = {
         "schema": "spread_bps_backtest_v1",
-        "analysis_date": datetime.now().strftime("%Y-%m-%d"),
+        # FIND-093 closure (2026-05-15 R-19 cycle): UTC for cross-operator
+        # reproducibility; local-TZ comparison breaks audit-trail consistency.
+        "analysis_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
         "export_dir": str(export_path),
         "train_mean": train_mean,
         "train_std": train_std,

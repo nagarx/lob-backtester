@@ -107,14 +107,23 @@ class ReadabilityHybridStrategy(Strategy):
             f"hold={self.holding_policy.policy_name})"
         )
 
-    def _check_entry_gate(self, i: int) -> bool:
-        """Check if event i passes ALL gates (readability + magnitude).
+    def _check_readability_gate(self, i: int) -> bool:
+        """Check if event i passes the 4 readability gates (agreement / confidence
+        / spread / directional). Does NOT check magnitude — that's the magnitude
+        gate's separate concern (see ``_check_magnitude_gate``).
 
-        #PY-71 (2026-05-15): added np.isfinite guards to comparison gates.
+        #PY-71 (2026-05-15): np.isfinite guards on agreement / confidence / spread.
         Pre-fix `value <op> threshold` evaluated False on NaN input (IEEE 754
-        NaN-comparison invariant), allowing NaN signals (agreement, confidence,
-        spread, predicted_returns) to PASS gates silently and trigger trades
-        on garbage. Per hft-rules §8. Fail-closed: NaN input → return False.
+        NaN-comparison invariant), allowing NaN signals to PASS gates silently
+        and trigger trades on garbage. Per hft-rules §8. Fail-closed: NaN → False.
+
+        #PY-NEW (2026-05-16, this cycle): `max_spread_bps > 0` sentinel preserved.
+        When max_spread_bps <= 0, the spread gate is intentionally disabled
+        (operators set 0 to mean "no spread filter"). Pre-consolidation, the
+        inline path at generate_signals lacked this sentinel and would reject
+        all trades when max_spread_bps=0 (the inline `spread[i] <= 0` is False
+        for any positive spread). Post-consolidation both paths honor the
+        sentinel uniformly.
         """
         agreement = self.agreement_ratio[i]
         if not np.isfinite(agreement) or agreement < self.config.min_agreement:
@@ -126,12 +135,36 @@ class ReadabilityHybridStrategy(Strategy):
             spread = self.spreads[i]
             if not np.isfinite(spread) or spread > self.config.max_spread_bps:
                 return False
-        if self.config.require_directional and self.label_mapping.is_stable(int(self.predictions[i])):
+        if self.config.require_directional and self.label_mapping.is_stable(
+            int(self.predictions[i])
+        ):
             return False
+        return True
+
+    def _check_magnitude_gate(self, i: int) -> bool:
+        """Check if event i's predicted return magnitude clears ``min_return_bps``.
+
+        #PY-71 (2026-05-15): np.isfinite guard on predicted_returns[i].
+        Fail-closed: NaN → False (no trade).
+
+        Separate from ``_check_readability_gate`` so that ``generate_signals``
+        can track ``n_readability_pass`` / ``n_magnitude_pass`` / ``n_both_pass``
+        counters independently (architectural observables surfaced in metadata).
+        """
         pred = self.predicted_returns[i]
         if not np.isfinite(pred) or abs(pred) < self.config.min_return_bps:
             return False
         return True
+
+    def _check_entry_gate(self, i: int) -> bool:
+        """Check if event i passes ALL gates (readability AND magnitude).
+
+        Composes ``_check_readability_gate`` AND ``_check_magnitude_gate`` for
+        backward-compatible callers (e.g., readability.py sister convention at
+        L225). ``generate_signals`` in this class uses the split methods
+        directly to maintain separate per-gate counters in metadata.
+        """
+        return self._check_readability_gate(i) and self._check_magnitude_gate(i)
 
     def _build_holding_state(
         self, i: int, entry_idx: int, position_side: int,
@@ -200,13 +233,19 @@ class ReadabilityHybridStrategy(Strategy):
                     cooldown_remaining -= 1
                     continue
 
-                readability_ok = (
-                    self.agreement_ratio[i] >= self.config.min_agreement
-                    and self.confirmation_score[i] > self.config.min_confidence
-                    and (self.spreads is None or self.spreads[i] <= self.config.max_spread_bps)
-                    and (not self.config.require_directional or not self.label_mapping.is_stable(int(self.predictions[i])))
-                )
-                magnitude_ok = abs(self.predicted_returns[i]) >= self.config.min_return_bps
+                # #PY-NEW closure (2026-05-16, dead-gate consolidation): inline
+                # checks pre-consolidation duplicated the gate logic of the
+                # `_check_entry_gate` method but lacked NaN guards (relied on
+                # IEEE 754 fail-closed coincidence) AND lacked the
+                # `max_spread_bps > 0` sentinel. Tests at
+                # tests/test_strategies/test_hybrid.py::TestHybridNaNGuards passed
+                # on the inline path only because OTHER NaN fields independently
+                # tripped fail-closed via `>=` /`>` semantics — the isolated
+                # NaN-spread case was uncovered. Post-consolidation both gates
+                # route through the same methods, so #PY-71 NaN discipline +
+                # max_spread_bps sentinel apply uniformly.
+                readability_ok = self._check_readability_gate(i)
+                magnitude_ok = self._check_magnitude_gate(i)
 
                 if readability_ok:
                     n_readability_pass += 1

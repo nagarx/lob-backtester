@@ -557,13 +557,24 @@ class BacktestConfig:
 
         dte_dict = d.get("zero_dte", {})
         opra_dict = dte_dict.get("opra_costs", {})
+        # HF-1 closure (2026-05-16 LATE; Bundle 1 hygiene post Option B Path B'):
+        # mode-aware IV default mirroring OpraCalibratedCosts.deep_itm() factory
+        # at config.py:209. Reads zero_dte.delta to detect regime:
+        #   delta >= 0.90 → Deep ITM (IV=0.25 per #PY-273 OPRA empirical median;
+        #     closes ~60-100% theta overestimation when YAML omits implied_vol)
+        #   else → ATM (IV=0.40 preserved; correct for atm_call_premium=1.88
+        #     and atm_put_premium=1.31 — class default at L173 unchanged)
+        # Operator-explicit YAML override always wins via .get() fallback.
+        # Sister to experiment.py:_build_zero_dte_config (same pattern).
+        _delta = dte_dict.get("delta", 0.50)
+        _iv_default = 0.25 if _delta >= 0.90 else 0.40
         opra_costs = OpraCalibratedCosts(
             atm_call_half_spread=opra_dict.get("atm_call_half_spread", 0.015),
             atm_put_half_spread=opra_dict.get("atm_put_half_spread", 0.010),
             atm_call_premium=opra_dict.get("atm_call_premium", 1.88),
             atm_put_premium=opra_dict.get("atm_put_premium", 1.31),
             commission_per_contract=opra_dict.get("commission_per_contract", 0.70),
-            implied_vol=opra_dict.get("implied_vol", 0.40),
+            implied_vol=opra_dict.get("implied_vol", _iv_default),
             entry_minutes_before_close=opra_dict.get("entry_minutes_before_close", 120.0),
         )
         zero_dte = ZeroDteConfig(

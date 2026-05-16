@@ -645,12 +645,22 @@ class ExperimentRunner:
                 return top_val
             return default
 
+        # HF-1 closure (2026-05-16 LATE; Bundle 1 hygiene post Option B Path B'):
+        # mode-aware IV default mirroring BacktestConfig.from_dict pattern at
+        # config.py:566. Reads delta from zd block (top-level OR nested per
+        # legacy fixtures) to detect regime:
+        #   delta >= 0.90 → Deep ITM (IV=0.25 per #PY-273 OPRA empirical median)
+        #   else → ATM (IV=0.40 preserved for ATM-regime back-compat)
+        # Operator-explicit YAML override wins via _opra_field nested-or-top-
+        # level dispatch (mutex enforced via raise on both-defined).
+        _delta = zd.get("delta", 0.50)
+        _iv_default = 0.25 if _delta >= 0.90 else 0.40
         return ZeroDteConfig(
             enabled=True,
-            delta=zd.get("delta", 0.50),
+            delta=_delta,
             opra_costs=OpraCalibratedCosts(
                 commission_per_contract=_opra_field("commission_per_contract", 0.70),
-                implied_vol=_opra_field("implied_vol", 0.40),
+                implied_vol=_opra_field("implied_vol", _iv_default),
                 entry_minutes_before_close=_opra_field("entry_minutes_before_close", 120.0),
             ),
             contracts_per_trade=zd.get("contracts_per_trade", 1),

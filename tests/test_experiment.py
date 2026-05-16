@@ -238,7 +238,12 @@ class TestZeroDteConfigBuildPY226:
     def test_zero_dte_neither_location_defaults(self, tmp_path: Path):
         """Back-compat: neither top-level nor nested zero_dte: defined →
         all defaults preserved (does NOT fail-loud since 0 production callers
-        rely on the missing-block path; see #PY-226 LATENT classification)."""
+        rely on the missing-block path; see #PY-226 LATENT classification).
+
+        HF-1 invariant (2026-05-16 LATE): default delta=0.50 (ATM regime) →
+        IV inherits 0.40 (ATM-correct). The HF-1 mode-aware default at
+        experiment.py:_build_zero_dte_config only changes the regime when
+        delta >= 0.90 (Deep ITM); ATM regime unchanged."""
         signal_dir = _create_regression_signal_dir(tmp_path)
         config = _make_regression_config(signal_dir, tmp_path)
         del config["zero_dte"]
@@ -250,6 +255,123 @@ class TestZeroDteConfigBuildPY226:
         assert zd_config.opra_costs.implied_vol == 0.40
         assert zd_config.opra_costs.entry_minutes_before_close == 120.0
         assert zd_config.contracts_per_trade == 1
+
+
+class TestHf1ModeAwareIvDefault:
+    """HF-1 closure (2026-05-16 LATE; Bundle 1 hygiene post Option B Path B'):
+    YAML-reader paths inherit mode-aware IV default mirroring
+    OpraCalibratedCosts.deep_itm() factory (#PY-273 closed factory at
+    config.py:209 but BacktestConfig.from_dict + _build_zero_dte_config
+    YAML-reader sites STILL inherited hard-coded 0.40 ATM default).
+
+    Mode-discrimination via delta>=0.90:
+      - delta >= 0.90 → Deep ITM regime → IV=0.25 (per OPRA empirical median)
+      - delta <  0.90 → ATM regime → IV=0.40 (preserved for back-compat)
+      - Operator-explicit YAML override always wins.
+
+    Covers experiment.py:_build_zero_dte_config path (production
+    orchestrator path via ExperimentRunner.from_yaml).
+    """
+
+    def test_deep_itm_delta_inherits_iv_025_default(self, tmp_path: Path):
+        """HF-1: zero_dte.delta=0.95 (Deep ITM regime) with omitted
+        implied_vol → factory-aligned default 0.25 (NOT ATM's 0.40)."""
+        signal_dir = _create_regression_signal_dir(tmp_path)
+        config = _make_regression_config(signal_dir, tmp_path)
+        # Override delta to Deep ITM; omit implied_vol (inherits default).
+        config["zero_dte"] = {
+            "enabled": True,
+            "delta": 0.95,
+        }
+        runner = ExperimentRunner(config)
+        zd_config = runner._build_zero_dte_config()
+        assert zd_config.delta == 0.95
+        assert zd_config.opra_costs.implied_vol == 0.25, (
+            f"HF-1: delta=0.95 (Deep ITM) with omitted implied_vol should "
+            f"inherit 0.25 (OpraCalibratedCosts.deep_itm() factory default "
+            f"per #PY-273) not 0.40 (ATM legacy default). "
+            f"Got {zd_config.opra_costs.implied_vol}."
+        )
+
+    def test_atm_delta_inherits_iv_040_default(self, tmp_path: Path):
+        """HF-1: zero_dte.delta=0.50 (ATM regime) with omitted implied_vol
+        → 0.40 default preserved (ATM-correct for atm_call_premium=1.88
+        + atm_put_premium=1.31 per class default at config.py:173).
+        Regression-locks ATM correctness; only Deep ITM regime changes."""
+        signal_dir = _create_regression_signal_dir(tmp_path)
+        config = _make_regression_config(signal_dir, tmp_path)
+        config["zero_dte"] = {
+            "enabled": True,
+            "delta": 0.50,
+        }
+        runner = ExperimentRunner(config)
+        zd_config = runner._build_zero_dte_config()
+        assert zd_config.delta == 0.50
+        assert zd_config.opra_costs.implied_vol == 0.40, (
+            f"HF-1: delta=0.50 (ATM) preserves IV=0.40 default. "
+            f"Got {zd_config.opra_costs.implied_vol}."
+        )
+
+    def test_explicit_implied_vol_overrides_mode_aware_default(self, tmp_path: Path):
+        """HF-1: operator-explicit YAML implied_vol wins regardless of
+        delta. Closes silent-override-drop class — explicit user intent
+        must NOT be silently replaced by mode-aware default."""
+        signal_dir = _create_regression_signal_dir(tmp_path)
+        config = _make_regression_config(signal_dir, tmp_path)
+        # Deep ITM regime BUT explicit override (top-level zd path)
+        config["zero_dte"] = {
+            "enabled": True,
+            "delta": 0.95,
+            "implied_vol": 0.30,  # explicit (between 0.25 and 0.40)
+        }
+        runner = ExperimentRunner(config)
+        zd_config = runner._build_zero_dte_config()
+        assert zd_config.opra_costs.implied_vol == 0.30, (
+            f"HF-1: explicit YAML implied_vol=0.30 must win regardless "
+            f"of delta=0.95 Deep ITM regime. Got "
+            f"{zd_config.opra_costs.implied_vol}."
+        )
+
+    def test_nested_opra_costs_override_wins_on_deep_itm(self, tmp_path: Path):
+        """HF-1 micro-fix Agent X HIGH-1: nested `opra_costs.implied_vol`
+        override path must also win on Deep ITM regime — closes the
+        load-bearing `_opra_field` nested-or-top-level dispatch at
+        experiment.py:633-646. Without this test, a future refactor of
+        `_opra_field` could silently drop nested overrides on Deep ITM."""
+        signal_dir = _create_regression_signal_dir(tmp_path)
+        config = _make_regression_config(signal_dir, tmp_path)
+        # Deep ITM regime + nested override (production-canonical
+        # placement per opra_costs: block convention)
+        config["zero_dte"] = {
+            "enabled": True,
+            "delta": 0.95,
+            "opra_costs": {
+                "implied_vol": 0.40,  # explicit ATM-IV on Deep ITM
+                                       # (sensitivity-sweep use case)
+            },
+        }
+        runner = ExperimentRunner(config)
+        zd_config = runner._build_zero_dte_config()
+        assert zd_config.opra_costs.implied_vol == 0.40, (
+            f"HF-1: nested opra_costs.implied_vol=0.40 must win over "
+            f"mode-aware default 0.25 (delta=0.95). Got "
+            f"{zd_config.opra_costs.implied_vol}."
+        )
+
+    def test_deep_itm_boundary_delta_090_inherits_025(self, tmp_path: Path):
+        """HF-1 boundary case: delta=0.90 (exactly at threshold) → Deep
+        ITM IV=0.25. Threshold is INCLUSIVE (>=0.90) per fix design.
+        Closes ambiguity: '>0.90' vs '>=0.90' would give different
+        results at exactly 0.90."""
+        signal_dir = _create_regression_signal_dir(tmp_path)
+        config = _make_regression_config(signal_dir, tmp_path)
+        config["zero_dte"] = {
+            "enabled": True,
+            "delta": 0.90,
+        }
+        runner = ExperimentRunner(config)
+        zd_config = runner._build_zero_dte_config()
+        assert zd_config.opra_costs.implied_vol == 0.25
 
 
 # ---------------------------------------------------------------------------

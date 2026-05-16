@@ -205,6 +205,87 @@ class TestBacktestConfig:
             assert loaded.position_size == 0.3
 
 
+class TestBacktestConfigHf1ModeAwareIvDefault:
+    """HF-1 closure (2026-05-16 LATE; Bundle 1 hygiene post Option B Path B'):
+    BacktestConfig.from_dict path mirror of TestHf1ModeAwareIvDefault in
+    test_experiment.py. Sister cycle's #PY-273 closed
+    OpraCalibratedCosts.deep_itm() factory default (0.40 → 0.25) but
+    BacktestConfig.from_dict at config.py:566 STILL inherited 0.40 as
+    hard-coded default → silent ~60-100% theta overestimation when YAML
+    omitted implied_vol on Deep ITM (delta>=0.90) configurations.
+
+    Mode-discrimination via zero_dte.delta>=0.90 fixes this. Class default
+    at config.py:173 remains 0.40 (correct for ATM regime — preserved by
+    these tests' ATM-default assertions).
+
+    Covers BacktestConfig.from_dict + BacktestConfig.load_yaml paths
+    (production-default for any YAML omitting opra_costs.implied_vol).
+    """
+
+    def test_deep_itm_delta_inherits_iv_025_default(self):
+        """HF-1: zero_dte.delta=0.95 + omitted implied_vol → 0.25 default
+        (NOT class default 0.40). Closes silent Deep ITM theta overestimation
+        for YAMLs that specify Deep ITM trading without explicit IV override."""
+        d = {
+            "initial_capital": 100000,
+            "zero_dte": {
+                "enabled": True,
+                "delta": 0.95,
+            },
+        }
+        config = BacktestConfig.from_dict(d)
+        assert config.zero_dte.delta == 0.95
+        assert config.zero_dte.opra_costs.implied_vol == 0.25, (
+            f"HF-1: delta=0.95 (Deep ITM) with omitted implied_vol should "
+            f"inherit 0.25 (factory-aligned with #PY-273); got "
+            f"{config.zero_dte.opra_costs.implied_vol}"
+        )
+
+    def test_atm_delta_inherits_iv_040_default(self):
+        """HF-1: zero_dte.delta=0.50 + omitted implied_vol → 0.40 default
+        preserved (ATM regime; matches class default at config.py:173).
+        Regression-locks ATM correctness — only Deep ITM regime changes."""
+        d = {
+            "initial_capital": 100000,
+            "zero_dte": {
+                "enabled": True,
+                "delta": 0.50,
+            },
+        }
+        config = BacktestConfig.from_dict(d)
+        assert config.zero_dte.delta == 0.50
+        assert config.zero_dte.opra_costs.implied_vol == 0.40
+
+    def test_explicit_implied_vol_overrides_mode_aware_default(self):
+        """HF-1: explicit YAML implied_vol wins regardless of delta regime.
+        Operator override never silently replaced by mode-aware default."""
+        d = {
+            "initial_capital": 100000,
+            "zero_dte": {
+                "enabled": True,
+                "delta": 0.95,  # Deep ITM regime
+                "opra_costs": {
+                    "implied_vol": 0.35,  # explicit override
+                },
+            },
+        }
+        config = BacktestConfig.from_dict(d)
+        assert config.zero_dte.opra_costs.implied_vol == 0.35, (
+            f"HF-1: explicit YAML implied_vol=0.35 must win over mode-aware "
+            f"default 0.25 (delta=0.95). Got "
+            f"{config.zero_dte.opra_costs.implied_vol}"
+        )
+
+    def test_omitted_zero_dte_block_preserves_class_default(self):
+        """HF-1 back-compat: YAML with no zero_dte block → default delta=0.50
+        (from BacktestConfig.from_dict default) → ATM regime → IV=0.40.
+        Locks 'missing-block path defaults to ATM' invariant."""
+        d = {"initial_capital": 100000}
+        config = BacktestConfig.from_dict(d)
+        assert config.zero_dte.delta == 0.50
+        assert config.zero_dte.opra_costs.implied_vol == 0.40
+
+
 class TestExchangePresetsSingleSource:
     """Phase 6 6A.6 regression guards — `_EXCHANGE_PRESETS` is the SINGLE
     SOURCE of exchange-calibrated cost data. Prior state duplicated the

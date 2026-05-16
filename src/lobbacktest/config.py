@@ -203,13 +203,45 @@ class OpraCalibratedCosts:
         return 2 * (spread_per_leg + self.commission_per_contract)
 
     @classmethod
-    def deep_itm(cls) -> "OpraCalibratedCosts":
+    def deep_itm(
+        cls,
+        *,
+        implied_vol: float = 0.25,
+        entry_minutes_before_close: float = 120.0,
+    ) -> "OpraCalibratedCosts":
         """Deep ITM option costs (delta ~0.95).
 
         Spreads are tighter (deep ITM options have narrower markets),
         theta is negligible. Commission is the same.
 
-        Source: IBKR-transactions-trades/COST_AUDIT_2026_03.md
+        #PY-273 closure (2026-05-16): default ``implied_vol=0.25``
+        reflects OPRA empirical Deep ITM IV-skew (~0.20-0.30 vs ATM's
+        0.40). Pre-#PY-273 default (0.40) inherited ATM IV and
+        overestimated Deep ITM theta by ~60-100% per BSM
+        ``θ = -S·σ·N'(0) / (2·√T)`` linearity in σ. NOTE: the
+        underlying BSM formula at ``engine/zero_dte.py:77`` remains
+        ATM-only (uses ``N'(0) = 0.3989`` regardless of moneyness);
+        a full d1/N'(d1) correction requires strike K plumbing
+        through the trade dataclass and is deferred to a dedicated
+        Phase Z architectural cycle (see #PY-271 + #PY-273 backlog).
+
+        #PY-274 closure (2026-05-16): keyword-only parameters allow
+        CLI flag pass-through via ``scripts/run_regression_backtest.py``
+        and ``scripts/run_readability_backtest.py`` (``--implied-vol``
+        and ``--entry-minutes-before-close``).
+
+        Args:
+            implied_vol: Annualized IV for BSM theta (default 0.25;
+                OPRA empirical Deep ITM median per
+                ``opra-statistical-profiler/output_opra_nvda/``).
+                Operator-overridable via CLI for sensitivity sweeps.
+            entry_minutes_before_close: Minutes before market close
+                at typical entry (default 120 = 14:00 ET). Operator-
+                overridable via CLI when signal timing differs.
+
+        Source:
+            - IBKR-transactions-trades/COST_AUDIT_2026_03.md
+            - opra-statistical-profiler/output_opra_nvda/03_ZeroDteTracker.json
         Breakeven: 1.4 bps at delta=0.95 on $180 NVDA (no theta).
         """
         return cls(
@@ -218,8 +250,8 @@ class OpraCalibratedCosts:
             atm_call_premium=20.0,  # deep ITM premium ~$20
             atm_put_premium=20.0,
             commission_per_contract=0.70,
-            implied_vol=0.40,
-            entry_minutes_before_close=120.0,
+            implied_vol=implied_vol,
+            entry_minutes_before_close=entry_minutes_before_close,
         )
 
     def to_dict(self) -> Dict[str, Any]:

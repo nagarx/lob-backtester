@@ -174,6 +174,120 @@ class TestOpraCalibratedCosts:
         assert abs(rt - expected) < 0.01, f"Put RT cost should be ${expected:.2f}, got ${rt:.2f}"
 
 
+class TestDeepItmFactoryPy273Py274:
+    """#PY-273 + #PY-274 closure (2026-05-16) — Deep ITM IV-skew + CLI pass-through.
+
+    Pre-fix `deep_itm()` was a no-args classmethod that hardcoded:
+      * `implied_vol=0.40` (inherited ATM IV; #PY-273 root cause)
+      * `entry_minutes_before_close=120.0` (hardcoded; #PY-274 ignored CLI flag)
+
+    Post-fix `deep_itm(*, implied_vol=0.25, entry_minutes_before_close=120.0)`:
+      * Default `implied_vol=0.25` reflects OPRA empirical Deep ITM IV-skew
+        (~0.20-0.30 vs ATM's 0.40). Closes #PY-273 60-100% theta overestimation
+        without strike-K plumbing (which would require Phase Z architectural cycle
+        per #PY-271 — Deep ITM N'(d1) ≈ 0 vs ATM N'(0)=0.3989; full d1-correction
+        is deferred).
+      * Keyword-only parameters allow CLI flag pass-through:
+        `OpraCalibratedCosts.deep_itm(implied_vol=args.implied_vol, ...)`
+        from `run_regression_backtest.py` + `run_readability_backtest.py`.
+        Closes #PY-274.
+
+    Theta is linear in σ per BSM ATM formula at zero_dte.py:77 — IV change from
+    0.40 → 0.25 reduces Deep ITM theta to 0.625x of pre-fix value (locked by
+    `test_deep_itm_theta_proportional_to_atm_via_iv_ratio` below).
+    """
+
+    def test_deep_itm_default_iv_is_025(self):
+        """#PY-273 closure: factory default `implied_vol=0.25` (not 0.40)."""
+        costs = OpraCalibratedCosts.deep_itm()
+        assert costs.implied_vol == 0.25, (
+            f"Deep ITM IV should default to 0.25 post-#PY-273 closure (was 0.40 "
+            f"pre-fix; ATM IV inheritance); got {costs.implied_vol}"
+        )
+
+    def test_deep_itm_iv_kwarg_override(self):
+        """#PY-274: kwarg propagates through factory for CLI sensitivity sweeps."""
+        costs = OpraCalibratedCosts.deep_itm(implied_vol=0.20)
+        assert costs.implied_vol == 0.20
+
+    def test_deep_itm_entry_minutes_kwarg_override(self):
+        """#PY-274: entry_minutes_before_close kwarg propagates for CLI override."""
+        costs = OpraCalibratedCosts.deep_itm(entry_minutes_before_close=60.0)
+        assert costs.entry_minutes_before_close == 60.0
+
+    def test_deep_itm_default_entry_minutes_is_120(self):
+        """#PY-274 back-compat: factory default `entry_minutes_before_close=120.0`."""
+        costs = OpraCalibratedCosts.deep_itm()
+        assert costs.entry_minutes_before_close == 120.0, (
+            "Default `entry_minutes_before_close` should remain 120 min "
+            "(14:00 ET entry) for back-compat with pre-#PY-274 callsites."
+        )
+
+    def test_deep_itm_default_spreads_unchanged(self):
+        """#PY-273 back-compat: spreads + premiums + commission unchanged post-fix.
+
+        Only `implied_vol` (and now keyword-only `entry_minutes_before_close`)
+        changed. The factory's other constants (tight Deep ITM spreads, $20
+        premium, $0.70 commission) are preserved bit-exact.
+        """
+        costs = OpraCalibratedCosts.deep_itm()
+        assert costs.atm_call_half_spread == 0.005
+        assert costs.atm_put_half_spread == 0.005
+        assert costs.atm_call_premium == 20.0
+        assert costs.atm_put_premium == 20.0
+        assert costs.commission_per_contract == 0.70
+
+    def test_deep_itm_theta_proportional_to_atm_via_iv_ratio(self):
+        """#PY-273: theta(deep_itm IV=0.25) ≈ 0.625 × theta(atm IV=0.40).
+
+        BSM ATM theta is linear in σ per `zero_dte.py:77`:
+            theta = -S · σ · N'(0) / (2 · √T)
+
+        Therefore theta_deep_itm / theta_atm = 0.25 / 0.40 = 0.625.
+
+        Locks the empirical 37.5% reduction in reported Deep ITM theta cost
+        post-#PY-273 closure (a 37.5% reduction equals the lower-end of the
+        backlog's "60-100% overestimation" range when interpreted as a
+        fractional bias on the *reported* number).
+        """
+        deep_itm_iv = OpraCalibratedCosts.deep_itm().implied_vol
+        atm_iv = OpraCalibratedCosts().implied_vol  # default 0.40
+
+        # Compute theta for both at identical S, T, hold
+        theta_deep_itm = theta_bsm_per_share(
+            underlying_price=180.0,
+            implied_vol=deep_itm_iv,
+            minutes_remaining=120.0,
+            holding_minutes=1.0,
+        )
+        theta_atm = theta_bsm_per_share(
+            underlying_price=180.0,
+            implied_vol=atm_iv,
+            minutes_remaining=120.0,
+            holding_minutes=1.0,
+        )
+
+        ratio = theta_deep_itm / theta_atm
+        expected_ratio = deep_itm_iv / atm_iv  # 0.25 / 0.40 = 0.625
+
+        assert abs(ratio - expected_ratio) < 1e-6, (
+            f"Deep ITM theta should be {expected_ratio:.4f}x ATM theta per BSM "
+            f"σ-linearity, got ratio={ratio:.4f}"
+        )
+
+    def test_deep_itm_iv_invalid_raises_via_post_init(self):
+        """#PY-273: invalid `implied_vol` raises via dataclass `__post_init__`.
+
+        Closes silent-failure class: pre-#PY-273 the factory hardcoded 0.40
+        making this validation path unreachable. Post-fix kwarg can be
+        operator-supplied via CLI — invalid values fail-loud per hft-rules §5.
+        """
+        with pytest.raises(ValueError, match="implied_vol must be > 0"):
+            OpraCalibratedCosts.deep_itm(implied_vol=0.0)
+        with pytest.raises(ValueError, match="implied_vol must be > 0"):
+            OpraCalibratedCosts.deep_itm(implied_vol=-0.10)
+
+
 class TestZeroDteConfig:
     """Verify ZeroDte configuration defaults."""
 

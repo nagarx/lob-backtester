@@ -253,6 +253,19 @@ class ZeroDteConfig:
         prefer_calls: True → enter calls on Up signals; False → enter puts (default: True)
         entry_window_start_et: Earliest entry time ET (default: "14:00")
         entry_window_end_et: Latest entry time ET (default: "15:30")
+        events_per_minute: FIND-NEW-01 closure (2026-05-16) — sampling cadence
+            for ``ZeroDtePnLTransformer.holding_minutes = events / events_per_minute``
+            derivation. ``None`` means "must be supplied at transformer-construction
+            time" (e.g., via ``--events-per-minute`` CLI on the production scripts).
+            When both ``events_per_minute`` and ``bin_seconds`` are non-None,
+            ``__post_init__`` raises ``ValueError`` (mutually exclusive per
+            hft-rules §5). When only ``bin_seconds`` is set, the transformer
+            derives ``events_per_minute = 60.0 / bin_seconds`` at construction.
+        bin_seconds: FIND-NEW-01 closure (2026-05-16) — sampling bin width in
+            seconds (time-based corpora). Sister of ``events_per_minute``; one
+            of the two must be supplied for ``ZeroDteConfig.enabled=True``
+            YAML configs consumed by ``ExperimentRunner``. For TB v3p0 60s
+            corpora: ``bin_seconds: 60`` (→ ``events_per_minute=1.0``).
     """
 
     enabled: bool = False
@@ -264,6 +277,8 @@ class ZeroDteConfig:
     prefer_calls: bool = True
     entry_window_start_et: str = "14:00"
     entry_window_end_et: str = "15:30"
+    events_per_minute: Optional[float] = None
+    bin_seconds: Optional[float] = None
 
     def __post_init__(self) -> None:
         if self.delta <= 0.0 or self.delta > 1.0:
@@ -272,6 +287,62 @@ class ZeroDteConfig:
             raise ValueError(f"max_holding_minutes must be > 0, got {self.max_holding_minutes}")
         if self.contracts_per_trade < 1:
             raise ValueError(f"contracts_per_trade must be >= 1, got {self.contracts_per_trade}")
+        # FIND-NEW-01 closure (2026-05-16): mutex + type + non-negative
+        # validation on sampling-cadence fields. Both can be None (operator
+        # passes events_per_minute directly at ZeroDtePnLTransformer
+        # construction); but if BOTH are set, fail-loud per hft-rules §5.
+        # MF-1 (HIGH, mid-impl gate): explicit isinstance guard prevents
+        # YAML type-coercion silent failures (e.g., `events_per_minute: "abc"`
+        # → otherwise raises confusing TypeError at the `<= 0` comparison
+        # below; this guard raises ValueError with FIND-NEW-01 context).
+        if self.events_per_minute is not None and self.bin_seconds is not None:
+            raise ValueError(
+                "ZeroDteConfig: events_per_minute and bin_seconds are mutually "
+                "exclusive (FIND-NEW-01 closure 2026-05-16). Supply exactly one "
+                "OR neither (pass at transformer-construction time)."
+            )
+        if self.events_per_minute is not None:
+            if not isinstance(self.events_per_minute, (int, float)) or isinstance(
+                self.events_per_minute, bool
+            ):
+                raise ValueError(
+                    f"events_per_minute must be numeric (int/float), got "
+                    f"{type(self.events_per_minute).__name__}={self.events_per_minute!r} "
+                    f"(FIND-NEW-01 closure 2026-05-16). YAML configs supplying "
+                    f"string values likely need quotes removed or numeric "
+                    f"casting in the producer side."
+                )
+            if self.events_per_minute <= 0:
+                raise ValueError(
+                    f"events_per_minute must be > 0, got {self.events_per_minute}"
+                )
+        if self.bin_seconds is not None:
+            if not isinstance(self.bin_seconds, (int, float)) or isinstance(
+                self.bin_seconds, bool
+            ):
+                raise ValueError(
+                    f"bin_seconds must be numeric (int/float), got "
+                    f"{type(self.bin_seconds).__name__}={self.bin_seconds!r} "
+                    f"(FIND-NEW-01 closure 2026-05-16)."
+                )
+            if self.bin_seconds <= 0:
+                raise ValueError(
+                    f"bin_seconds must be > 0, got {self.bin_seconds}"
+                )
+
+    @property
+    def resolved_events_per_minute(self) -> Optional[float]:
+        """FIND-NEW-01 closure (2026-05-16): resolve sampling cadence from YAML.
+
+        Returns the explicit ``events_per_minute`` if set, else derives from
+        ``bin_seconds`` (``= 60.0 / bin_seconds``), else ``None`` (operator
+        must pass at transformer-construction time).
+        """
+        if self.events_per_minute is not None:
+            return self.events_per_minute
+        if self.bin_seconds is not None:
+            return 60.0 / self.bin_seconds
+        return None
 
 
 @dataclass
@@ -418,6 +489,20 @@ class BacktestConfig:
                 "entry_window_start_et": self.zero_dte.entry_window_start_et,
                 "entry_window_end_et": self.zero_dte.entry_window_end_et,
                 "opra_costs": self.zero_dte.opra_costs.to_dict(),
+                # FIND-NEW-01 closure (2026-05-16): emit sampling-cadence
+                # fields so YAML round-trip preserves operator-set values.
+                # Only emit when non-None to keep YAML compact for legacy
+                # configs that pass events_per_minute at the transformer.
+                **(
+                    {"events_per_minute": self.zero_dte.events_per_minute}
+                    if self.zero_dte.events_per_minute is not None
+                    else {}
+                ),
+                **(
+                    {"bin_seconds": self.zero_dte.bin_seconds}
+                    if self.zero_dte.bin_seconds is not None
+                    else {}
+                ),
             }
         return result
 
@@ -459,6 +544,11 @@ class BacktestConfig:
             prefer_calls=dte_dict.get("prefer_calls", True),
             entry_window_start_et=dte_dict.get("entry_window_start_et", "14:00"),
             entry_window_end_et=dte_dict.get("entry_window_end_et", "15:30"),
+            # FIND-NEW-01 closure (2026-05-16): read sampling cadence from YAML.
+            # ``None`` default preserves legacy YAML configs that supply
+            # ``events_per_minute`` directly at transformer construction.
+            events_per_minute=dte_dict.get("events_per_minute"),
+            bin_seconds=dte_dict.get("bin_seconds"),
         )
 
         return cls(

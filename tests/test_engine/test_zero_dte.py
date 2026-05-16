@@ -235,7 +235,9 @@ class TestAlternationContract:
         ]
         result = self._make_result(trades, trade_pnls=np.array([4.8]))
 
-        transformer = ZeroDtePnLTransformer(config=ZeroDteConfig())
+        transformer = ZeroDtePnLTransformer(
+            config=ZeroDteConfig(), events_per_minute=10.0
+        )
         with pytest.raises(ZeroDteAlternationError, match="2 trades per round-trip"):
             transformer.transform(result)
 
@@ -253,6 +255,209 @@ class TestAlternationContract:
         ]
         result = self._make_result(trades, trade_pnls=np.array([4.8, 5.0]))
 
-        transformer = ZeroDtePnLTransformer(config=ZeroDteConfig())
+        transformer = ZeroDtePnLTransformer(
+            config=ZeroDteConfig(), events_per_minute=10.0
+        )
         with pytest.raises(ZeroDteAlternationError, match="alternation violated"):
             transformer.transform(result)
+
+
+# ---------------------------------------------------------------------------
+# FIND-NEW-01 closure (2026-05-16) regression lock
+# ---------------------------------------------------------------------------
+
+
+class TestSamplingCadenceRegression:
+    """FIND-NEW-01 closure (2026-05-16) — events_per_minute is REQUIRED.
+
+    Pre-FIND-NEW-01, ``ZeroDtePnLTransformer.__init__`` defaulted to
+    ``events_per_minute=10.0`` (calibrated for event-based ~1000 events/day
+    corpora). When TB v3p0 (60s time-based, 1.0 events/min) backtests
+    inherited this default, ``holding_minutes = events / events_per_minute``
+    was silently 10x smaller than reality:
+
+      * 30-event hold reported as 3 min (= 30 / 10) but actual = 30 min (= 30 / 1)
+      * BSM theta cost reported as ~$1.27/trade (linear in holding_minutes)
+        but actual ≈ $12.64/trade
+      * R-17a / R-19 / R-16d / R-16e absolute cost-economics analyses were
+        all biased toward over-optimistic per-trade economics
+      * Comparative ranking (cross-arm within a sweep) was preserved
+        because the bias applied uniformly
+
+    Verified empirically via:
+      * ``grep events_per_minute lob-backtester/src/lobbacktest/engine/zero_dte.py``
+        → confirms default removed
+      * ``lob-backtester/scripts/run_spread_signal_backtest.py:549`` already
+        passed ``events_per_minute=1.0`` explicitly — author was aware of
+        the bug for ONE script but the fix didn't propagate to the others
+      * ``lob-backtester/BACKTEST_INDEX.md`` R-17a/R-19 entries literally
+        report "30.0 events | 3.0 min hold" + theta $1.27 → math is
+        30/10.0 = 3.0 (buggy) vs 30/1.0 = 30.0 (correct)
+
+    See ``lob-backtester/VALIDATION_FINDINGS_2026_05_14.md`` FIND-NEW-01 +
+    monorepo-root ``CLAUDE.md`` 2026-05-16 banner for full closure narrative.
+    """
+
+    def _make_result_for_30_event_hold(self) -> BacktestResult:
+        """Synthetic 2-trade fixture: entry at t=0, exit at t=30.
+
+        Per BacktestResult invariant ``final_equity == equity_curve[-1]``,
+        the fixture keeps the equity flat — the test asserts on
+        ``holding_periods_minutes`` and ``theta_costs`` (functions of
+        ``index_delta`` and ``events_per_minute``), NOT on equity PnL.
+        """
+        trades = [
+            Trade(index=0, side=TradeSide.BUY, price=180.0, size=1, cost=0.0),
+            Trade(index=30, side=TradeSide.FLAT, price=181.0, size=1, cost=0.0),
+        ]
+        n = 31
+        return BacktestResult(
+            equity_curve=np.array([100.0] * n),
+            returns=np.zeros(n - 1),
+            positions=np.zeros(n),
+            prices=np.array([180.0] * n),
+            predictions=np.zeros(n),
+            labels=None,
+            trades=trades,
+            trade_pnls=np.array([0.0]),
+            metrics={},
+            config_dict={},
+            initial_capital=100.0,
+            final_equity=100.0,
+            total_trades=2,
+            start_index=0,
+            end_index=n - 1,
+        )
+
+    def test_events_per_minute_required_no_default(self):
+        """events_per_minute has no default; calling without it raises TypeError.
+
+        Pre-FIND-NEW-01 silently used ``events_per_minute=10.0``; post-fix
+        the absent positional/kwarg raises at construction time per
+        hft-rules §5 fail-fast.
+        """
+        with pytest.raises(TypeError, match="events_per_minute"):
+            ZeroDtePnLTransformer(ZeroDteConfig())  # type: ignore[call-arg]
+
+    def test_events_per_minute_zero_raises_with_findnew01_context(self):
+        """events_per_minute=0 raises ValueError citing FIND-NEW-01 + actionable
+        migration hint per hft-rules §5."""
+        with pytest.raises(ValueError, match="FIND-NEW-01"):
+            ZeroDtePnLTransformer(ZeroDteConfig(), events_per_minute=0.0)
+
+    def test_events_per_minute_negative_raises(self):
+        """Negative events_per_minute raises ValueError (defensive — same
+        guard as zero)."""
+        with pytest.raises(ValueError, match="events_per_minute must be > 0"):
+            ZeroDtePnLTransformer(ZeroDteConfig(), events_per_minute=-1.0)
+
+    def test_30_event_hold_yields_30_min_at_60s_cadence(self):
+        """TB v3p0 60s bins → events_per_minute=1.0 → 30-event hold = 30 min.
+
+        Pre-FIND-NEW-01: 30 / 10.0 = 3 min (silent 10x bias). Post-fix:
+        30 / 1.0 = 30 min (matches wall-clock).
+        """
+        result = self._make_result_for_30_event_hold()
+        config = ZeroDteConfig(
+            enabled=True,
+            delta=0.95,
+            opra_costs=OpraCalibratedCosts.deep_itm(),
+            max_holding_minutes=120.0,  # don't clip — verify true value
+        )
+        transformer = ZeroDtePnLTransformer(config, events_per_minute=1.0)
+        out = transformer.transform(result)
+        assert out.holding_periods_minutes[0] == 30.0, (
+            f"30-event hold at events_per_minute=1.0 (TB v3p0 60s) should "
+            f"yield 30 min, got {out.holding_periods_minutes[0]}. "
+            f"Pre-FIND-NEW-01 silent default events_per_minute=10.0 gave "
+            f"3 min."
+        )
+
+    def test_30_event_hold_yields_3_min_at_legacy_cadence(self):
+        """Legacy event-based ~1000/day → events_per_minute=10.0 → 30-event
+        hold = 3 min. Verifies the legacy calibration path still works when
+        operator supplies events_per_minute=10.0 explicitly."""
+        result = self._make_result_for_30_event_hold()
+        config = ZeroDteConfig(
+            enabled=True,
+            delta=0.95,
+            opra_costs=OpraCalibratedCosts.deep_itm(),
+            max_holding_minutes=120.0,
+        )
+        transformer = ZeroDtePnLTransformer(config, events_per_minute=10.0)
+        out = transformer.transform(result)
+        assert out.holding_periods_minutes[0] == 3.0, (
+            f"30-event hold at events_per_minute=10.0 (legacy event-based "
+            f"~1000/day) should yield 3 min, got {out.holding_periods_minutes[0]}"
+        )
+
+    def test_theta_cost_on_tb_v3p0_60s_matches_atm_reference(self):
+        """Theta cost on TB v3p0 60s (events_per_minute=1.0) at 30-event hold
+        should be ~10x larger than legacy event-based (events_per_minute=10.0).
+
+        Reference: BSM theta is linear in holding_minutes for short holds
+        relative to T (see zero_dte.py theta_bsm_per_share). So
+        theta(30 min) ≈ 10 × theta(3 min). At 14:00 ET (120 min remaining),
+        $180 NVDA, 40% IV, ATM (half_spread=$0.015): theta @ 1 min ≈ $0.42
+        per contract → theta @ 30 min ≈ $12.60 (vs theta @ 3 min ≈ $1.26).
+        """
+        result = self._make_result_for_30_event_hold()
+        config = ZeroDteConfig(
+            enabled=True,
+            delta=0.50,
+            opra_costs=OpraCalibratedCosts(
+                atm_call_half_spread=0.015,
+                atm_put_half_spread=0.010,
+                commission_per_contract=0.70,
+                implied_vol=0.40,
+                entry_minutes_before_close=120.0,
+            ),
+            max_holding_minutes=120.0,
+        )
+        # 60s cadence (post-fix)
+        theta_60s = ZeroDtePnLTransformer(
+            config, events_per_minute=1.0
+        ).transform(result).theta_costs[0]
+        # Legacy event-based cadence (pre-fix silent default)
+        theta_legacy = ZeroDtePnLTransformer(
+            config, events_per_minute=10.0
+        ).transform(result).theta_costs[0]
+        # Post-fix should be ~10x the pre-fix value (linear in holding_minutes)
+        ratio = theta_60s / theta_legacy if theta_legacy > 0 else 0
+        assert 9.5 < ratio < 10.5, (
+            f"theta(60s, 30min hold) / theta(legacy, 3min hold) should be ~10 "
+            f"(BSM theta linear in holding_minutes), got {ratio:.2f}"
+        )
+        # Magnitude check: theta_60s should be in [$8, $16] range per BSM
+        # reference at 14:00 ET, $180 NVDA, 40% IV.
+        assert 8.0 < theta_60s < 16.0, (
+            f"Theta on TB v3p0 60s with 30-event hold (= 30 min wall-clock) "
+            f"should be ~$8-16/contract (BSM reference: $0.42/min × 30 ≈ "
+            f"$12.60), got ${theta_60s:.2f}. Pre-FIND-NEW-01 reported ~$1.27."
+        )
+
+    def test_zero_dte_config_mutex_validation(self):
+        """ZeroDteConfig.__post_init__ raises when both events_per_minute and
+        bin_seconds are set (mutually exclusive per hft-rules §5)."""
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            ZeroDteConfig(events_per_minute=1.0, bin_seconds=60.0)
+
+    def test_zero_dte_config_resolved_events_per_minute_from_bin_seconds(self):
+        """ZeroDteConfig.resolved_events_per_minute derives correctly from
+        bin_seconds (= 60.0 / bin_seconds)."""
+        cfg = ZeroDteConfig(bin_seconds=60.0)
+        assert cfg.resolved_events_per_minute == 1.0
+        cfg = ZeroDteConfig(bin_seconds=5.0)
+        assert cfg.resolved_events_per_minute == 12.0
+
+    def test_zero_dte_config_resolved_events_per_minute_explicit_wins(self):
+        """When events_per_minute is set explicitly, the property returns it
+        directly (bin_seconds derivation not used)."""
+        cfg = ZeroDteConfig(events_per_minute=2.5)
+        assert cfg.resolved_events_per_minute == 2.5
+
+    def test_zero_dte_config_resolved_events_per_minute_none_when_unset(self):
+        """When neither field is set, the property returns None (caller must
+        supply at transformer-construction time)."""
+        cfg = ZeroDteConfig()
+        assert cfg.resolved_events_per_minute is None

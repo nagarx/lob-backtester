@@ -218,15 +218,53 @@ class ZeroDtePnLTransformer:
 
     Args:
         config: ZeroDteConfig with IBKR-calibrated cost model
-        events_per_minute: Estimated events per minute for holding period
-            conversion (default: 10, calibrated for active trading hours)
+        events_per_minute: Events per minute for holding period conversion.
+            **REQUIRED — no silent default.**
+
+            FIND-NEW-01 closure (2026-05-16): pre-fix this parameter defaulted
+            to ``10.0`` (calibrated for event-based corpora ~1000 events/day).
+            Time-based corpora (e.g., TB v3p0 60s bins → 1.0 event/min)
+            silently inherited the wrong calibration, causing
+            ``holding_minutes = events / 10.0`` to under-report hold time by
+            ~10x → theta cost under-reported by ~10x → R-17a/R-19/R-16d/R-16e
+            absolute cost-economics analyses were all biased. Comparative
+            ranking (cross-arm within a single sweep) was preserved because
+            the bias applied uniformly.
+
+            Operator MUST specify:
+              * Time-based corpora: ``events_per_minute = 60.0 / bin_seconds``
+                - TB v3p0 60s bins → ``events_per_minute=1.0``
+                - TB v3p0 30s bins → ``events_per_minute=2.0``
+                - TB v3p0 5s  bins → ``events_per_minute=12.0``
+              * Event-based corpora: operator-supplied true rate (typical
+                ~10 events/min for active trading hours).
+
+            CLI helpers ``--bin-seconds`` / ``--events-per-minute`` on
+            ``scripts/run_regression_backtest.py`` and
+            ``scripts/run_readability_backtest.py`` enforce this at argparse
+            time (mutually exclusive, at least one required).
+
+            See ``lob-backtester/VALIDATION_FINDINGS_2026_05_14.md`` FIND-NEW-01
+            (filed 2026-05-16) for the full closure narrative.
+
+    Raises:
+        ValueError: if ``events_per_minute <= 0`` (fail-loud per hft-rules §5).
     """
 
     def __init__(
         self,
         config: ZeroDteConfig,
-        events_per_minute: float = 10.0,
+        events_per_minute: float,
     ):
+        if events_per_minute <= 0:
+            raise ValueError(
+                f"events_per_minute must be > 0, got {events_per_minute}. "
+                f"FIND-NEW-01 (2026-05-16) closed the silent-default class: "
+                f"pre-fix this defaulted to 10.0, miscalibrated for time-based "
+                f"corpora (TB v3p0 60s → true 1.0 events/min). Pass an explicit "
+                f"value derived from your corpus sampling cadence: "
+                f"events_per_minute = 60.0 / bin_seconds."
+            )
         self.config = config
         self.events_per_minute = events_per_minute
 

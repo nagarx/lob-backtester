@@ -55,6 +55,7 @@ def run_one_backtest(
     data, prices, config, strategy_config, holding_policy,
     zero_dte_config, label, verbose=True, output_dir: Optional[Path] = None,
     run_name: Optional[str] = None,
+    events_per_minute: Optional[float] = None,
 ):
     """Run a single backtest with given strategy config and return results.
 
@@ -122,7 +123,18 @@ def run_one_backtest(
                 print(f"  {k}: {summary[k]:.4f}")
 
     if zero_dte_config.enabled:
-        transformer = ZeroDtePnLTransformer(zero_dte_config)
+        # FIND-NEW-01 closure (2026-05-16): events_per_minute is REQUIRED
+        # (no silent default). main() supplies via --bin-seconds /
+        # --events-per-minute CLI flag at argparse time.
+        if events_per_minute is None:
+            raise ValueError(
+                "run_one_backtest: events_per_minute required when zero_dte "
+                "is enabled (FIND-NEW-01 closure 2026-05-16). Pass via "
+                "--bin-seconds or --events-per-minute on the CLI."
+            )
+        transformer = ZeroDtePnLTransformer(
+            zero_dte_config, events_per_minute=events_per_minute
+        )
         option_result = transformer.transform(result)
         summary["option_final_equity"] = round(option_result.option_final_equity, 2)
         summary["option_return_pct"] = round(option_result.option_total_return * 100, 2)
@@ -205,7 +217,80 @@ def main():
             "given value. Skipped when omitted (backward-compatible)."
         ),
     )
+
+    # FIND-NEW-01 closure (2026-05-16): mutually-exclusive sampling-cadence
+    # flag pair. Pre-fix the engine default events_per_minute=10.0 silently
+    # miscalibrated TB v3p0 60s backtests (true 1.0 events/min), causing
+    # ~10x theta cost understatement in R-17a/R-19/R-16d/R-16e. Fail-loud
+    # requires explicit operator calibration when --zero-dte is enabled
+    # (the default; the only path that reads events_per_minute). When
+    # --no-zero-dte is passed, the flags are not consulted — preserves
+    # back-compat with spot-leg-only invocations.
+    #
+    # For time-based corpora (v3p0): pass --bin-seconds 60 (or 30 / 5 / etc.);
+    #     events_per_minute is derived as 60.0 / bin_seconds.
+    # For event-based corpora (legacy R9-R14 ~1000/day): pass
+    #     --events-per-minute 10.0 (the pre-fix silent default; supply it
+    #     explicitly per FIND-NEW-01).
+    cadence_group = parser.add_mutually_exclusive_group(required=False)
+    cadence_group.add_argument(
+        "--bin-seconds",
+        type=float,
+        default=None,
+        help=(
+            "Sampling cadence in seconds (time-based corpora). Derives "
+            "events_per_minute = 60.0 / bin_seconds. TB v3p0 60s → 60. "
+            "Mutually exclusive with --events-per-minute. "
+            "Required when --zero-dte is enabled (the default). "
+            "FIND-NEW-01 closure 2026-05-16."
+        ),
+    )
+    cadence_group.add_argument(
+        "--events-per-minute",
+        type=float,
+        default=None,
+        help=(
+            "Events per minute (event-based corpora; escape hatch when "
+            "--bin-seconds is not applicable). Legacy R9-R14 event-based "
+            "~1000/day data: pass 10.0 (pre-FIND-NEW-01 silent default). "
+            "Mutually exclusive with --bin-seconds. "
+            "Required when --zero-dte is enabled (the default). "
+            "FIND-NEW-01 closure 2026-05-16."
+        ),
+    )
+
     args = parser.parse_args()
+
+    # FIND-NEW-01 closure (2026-05-16): derive effective events_per_minute.
+    # Only required when --zero-dte enabled — argparse default. When
+    # --no-zero-dte, ZeroDtePnLTransformer is not instantiated so the
+    # cadence is unused.
+    events_per_minute: Optional[float] = None
+    if args.zero_dte:
+        if args.bin_seconds is None and args.events_per_minute is None:
+            parser.error(
+                "--bin-seconds OR --events-per-minute is required when "
+                "--zero-dte is enabled (FIND-NEW-01 closure 2026-05-16; "
+                "no silent default per hft-rules §5). For TB v3p0 60s use "
+                "--bin-seconds 60; for legacy event-based ~1000/day use "
+                "--events-per-minute 10.0. Pass --no-zero-dte to bypass."
+            )
+        if args.bin_seconds is not None:
+            if args.bin_seconds <= 0:
+                parser.error(f"--bin-seconds must be > 0, got {args.bin_seconds}")
+            events_per_minute = 60.0 / args.bin_seconds
+            cadence_source = f"--bin-seconds {args.bin_seconds}"
+        else:
+            if args.events_per_minute <= 0:
+                parser.error(
+                    f"--events-per-minute must be > 0, got {args.events_per_minute}"
+                )
+            events_per_minute = args.events_per_minute
+            cadence_source = f"--events-per-minute {args.events_per_minute}"
+        print(
+            f"  Sampling cadence: {cadence_source} → "
+            f"events_per_minute={events_per_minute:.4f}"
+        )
 
     signal_dir = Path(args.signals)
     if not signal_dir.exists():
@@ -346,6 +431,7 @@ def main():
             data, data.prices, config, strategy_config, holding_policy,
             zero_dte_config, label,
             output_dir=output_dir, run_name=args.name,
+            events_per_minute=events_per_minute,
         )
         all_results.append(result)
 

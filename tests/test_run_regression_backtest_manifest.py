@@ -385,6 +385,7 @@ class TestAutoDiscoverPrimaryHorizonIdx:
              "--signals", str(signal_dir),
              "--name", "test_explicit",
              "--exchange", "XNAS", "--deep-itm",
+             "--bin-seconds", "60",  # FIND-NEW-01 closure 2026-05-16
              "--primary-horizon-idx", "0",
              "--output-dir", str(output_dir)],
             capture_output=True, text=True, timeout=60,
@@ -409,6 +410,7 @@ class TestAutoDiscoverPrimaryHorizonIdx:
              "--signals", str(signal_dir),
              "--name", "test_auto",
              "--exchange", "XNAS", "--deep-itm",
+             "--bin-seconds", "60",  # FIND-NEW-01 closure 2026-05-16
              # NO --primary-horizon-idx flag
              "--output-dir", str(output_dir)],
             capture_output=True, text=True, timeout=60,
@@ -433,6 +435,7 @@ class TestAutoDiscoverPrimaryHorizonIdx:
              "--signals", str(signal_dir),
              "--name", "test_no_compat",
              "--exchange", "XNAS", "--deep-itm",
+             "--bin-seconds", "60",  # FIND-NEW-01 closure 2026-05-16
              "--output-dir", str(output_dir)],
             capture_output=True, text=True, timeout=60,
         )
@@ -456,6 +459,7 @@ class TestAutoDiscoverPrimaryHorizonIdx:
              "--signals", str(signal_dir),
              "--name", "test_no_field",
              "--exchange", "XNAS", "--deep-itm",
+             "--bin-seconds", "60",  # FIND-NEW-01 closure 2026-05-16
              "--output-dir", str(output_dir)],
             capture_output=True, text=True, timeout=60,
         )
@@ -551,6 +555,7 @@ class TestPerTradePnlsDump:
                 "--output-dir", str(output_dir),
                 "--zero-dte",  # required for option_trade_pnls dump
                 "--deep-itm",  # use deep ITM cost model
+                "--bin-seconds", "60",  # FIND-NEW-01 closure 2026-05-16
                 "--max-spread-bps", "100.0",  # permissive spread filter
             ],
             capture_output=True, text=True, timeout=120,
@@ -595,6 +600,7 @@ class TestPerTradePnlsDump:
                 "--exchange", "XNAS",
                 "--output-dir", str(output_dir),
                 "--deep-itm",
+                "--bin-seconds", "60",  # FIND-NEW-01 closure 2026-05-16
                 "--max-spread-bps", "100.0",
             ],
             capture_output=True, text=True, timeout=120,
@@ -625,6 +631,7 @@ class TestPerTradePnlsDump:
                 "--exchange", "XNAS",
                 "--output-dir", str(output_dir),
                 "--deep-itm",
+                "--bin-seconds", "60",  # FIND-NEW-01 closure 2026-05-16
                 "--max-spread-bps", "100.0",
             ],
             capture_output=True, text=True, timeout=120, check=True,
@@ -659,6 +666,7 @@ class TestPerTradePnlsDump:
                 "--exchange", "XNAS",
                 "--output-dir", str(output_dir),
                 "--deep-itm",
+                "--bin-seconds", "60",  # FIND-NEW-01 closure 2026-05-16
                 "--max-spread-bps", "100.0",
             ],
             capture_output=True, text=True, timeout=120,
@@ -687,6 +695,7 @@ class TestPerTradePnlsDump:
                 "--exchange", "XNAS",
                 "--output-dir", str(output_dir),
                 "--deep-itm",
+                "--bin-seconds", "60",  # FIND-NEW-01 closure 2026-05-16
                 "--max-spread-bps", "100.0",
             ],
             capture_output=True, text=True, timeout=120, check=True,
@@ -742,10 +751,14 @@ class TestPerTradePnlsDumpInProcess:
         )
         holding_policy = create_holding_policy({"type": "horizon_aligned", "hold_events": 10})
 
-        # NO output_dir + NO run_name → no dump expected
+        # NO output_dir + NO run_name → no dump expected.
+        # events_per_minute=10.0 supplied explicitly post-FIND-NEW-01 closure
+        # (2026-05-16) — was the silent pre-fix default; supply it here to
+        # exercise the legacy event-based-equivalent calibration path.
         summary = run_one_backtest(
             data, data.prices, config, strategy_config, holding_policy,
             zero_dte_config, "test_label", verbose=False,
+            events_per_minute=10.0,
             # output_dir=None (default), run_name=None (default)
         )
         # Summary should NOT contain "option_trade_pnls_path" key
@@ -788,6 +801,7 @@ class TestPerTradePnlsDumpInProcess:
             zero_dte_config, "test_label", verbose=False,
             output_dir=output_dir,
             run_name="",  # EMPTY string — must be rejected by truthy guard
+            events_per_minute=10.0,  # FIND-NEW-01 closure 2026-05-16
         )
         # No .npy files written (truthy guard rejected empty run_name)
         npy_files = list(output_dir.glob("*.npy"))
@@ -833,6 +847,7 @@ class TestPerTradePnlsDumpInProcess:
             zero_dte_config, "ultra_conv_test", verbose=False,
             output_dir=output_dir,
             run_name="n_trades_zero",
+            events_per_minute=10.0,  # FIND-NEW-01 closure 2026-05-16
         )
         # No .npy emission for this threshold (n_trades=0 short-circuit)
         npy_files = list(output_dir.glob("n_trades_zero__option_trade_pnls__*.npy"))

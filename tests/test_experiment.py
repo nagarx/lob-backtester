@@ -132,10 +132,21 @@ class TestSingleRun:
         assert registry_dir.exists()
 
     def test_run_with_zero_dte(self, tmp_path: Path):
-        """0DTE transformation applied when enabled."""
+        """0DTE transformation applied when enabled.
+
+        Post-FIND-NEW-01 closure (2026-05-16): `events_per_minute` is now
+        required in the zero_dte YAML block (no silent default at the
+        ZeroDtePnLTransformer). Supplied as 10.0 here for back-compat with
+        the original pre-fix calibration (event-based ~1000/day → ~10/min).
+        """
         signal_dir = _create_regression_signal_dir(tmp_path)
         config = _make_regression_config(signal_dir, tmp_path)
-        config["zero_dte"] = {"enabled": True, "delta": 0.50, "commission_per_contract": 0.70}
+        config["zero_dte"] = {
+            "enabled": True,
+            "delta": 0.50,
+            "commission_per_contract": 0.70,
+            "events_per_minute": 10.0,  # FIND-NEW-01 closure
+        }
         runner = ExperimentRunner(config)
         result = runner.run()
 

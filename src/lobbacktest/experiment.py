@@ -349,7 +349,35 @@ class ExperimentRunner:
         zero_dte_config = self.config.get("zero_dte", {})
         option_metrics = {}
         if zero_dte_config.get("enabled", False):
-            transformer = ZeroDtePnLTransformer(self._build_zero_dte_config())
+            # FIND-NEW-01 closure (2026-05-16): resolve sampling cadence from
+            # the YAML zero_dte block (or backtest.zero_dte nested form per
+            # #PY-226 closure). ZeroDteConfig.resolved_events_per_minute
+            # returns None when neither bin_seconds nor events_per_minute is
+            # set in YAML — fail-loud per hft-rules §5 with actionable
+            # migration message pointing at the correct YAML schema.
+            built_zd_config = self._build_zero_dte_config()
+            events_per_minute = built_zd_config.resolved_events_per_minute
+            if events_per_minute is None:
+                raise ValueError(
+                    "ExperimentRunner: zero_dte.enabled=True requires either "
+                    "'bin_seconds' or 'events_per_minute' in the zero_dte: "
+                    "block (FIND-NEW-01 closure 2026-05-16). Pre-fix the "
+                    "engine silently defaulted to events_per_minute=10.0, "
+                    "miscalibrated for time-based corpora (TB v3p0 60s → "
+                    "true 1.0 events/min, causing ~10x theta cost "
+                    "understatement).\n"
+                    "Migrate YAML to:\n"
+                    "  zero_dte:\n"
+                    "    enabled: true\n"
+                    "    bin_seconds: 60  # for TB v3p0 60s corpora\n"
+                    "    # OR\n"
+                    "    events_per_minute: 1.0  # equivalent escape hatch\n"
+                    "See lob-backtester/VALIDATION_FINDINGS_2026_05_14.md "
+                    "FIND-NEW-01 for the full closure narrative."
+                )
+            transformer = ZeroDtePnLTransformer(
+                built_zd_config, events_per_minute=events_per_minute
+            )
             zero_dte_result = transformer.transform(result)
             option_metrics = {
                 "option_total_return": zero_dte_result.option_total_return,
@@ -626,6 +654,13 @@ class ExperimentRunner:
                 entry_minutes_before_close=_opra_field("entry_minutes_before_close", 120.0),
             ),
             contracts_per_trade=zd.get("contracts_per_trade", 1),
+            # FIND-NEW-01 closure (2026-05-16): pass sampling-cadence YAML
+            # fields through to ZeroDteConfig. ZeroDteConfig.__post_init__
+            # validates mutex; ZeroDteConfig.resolved_events_per_minute
+            # derives the effective value (None if neither set → caller
+            # must supply at transformer-construction time).
+            events_per_minute=zd.get("events_per_minute"),
+            bin_seconds=zd.get("bin_seconds"),
         )
 
     def _load_signal_metadata(self, signal_dir: Path) -> dict:

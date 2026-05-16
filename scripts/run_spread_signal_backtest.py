@@ -40,6 +40,14 @@ from lobbacktest.strategies.regression import RegressionStrategy, RegressionStra
 from lobbacktest.strategies.holding import HorizonAlignedPolicy
 from hft_evaluator.data.loader import ExportLoader
 
+# FIND-NEW-04 closure (2026-05-16): atomic-write SSoT for results.json +
+# REPORT.md. Pre-fix non-atomic `open + json.dump` / `open + f.write` left
+# the door open for SIGKILL-mid-write corruption — partial JSON would
+# silently produce JSONDecodeError or truncated REPORT.md on subsequent
+# operator inspection. Mirrors FIND-090 closure pattern (2026-05-15 R-19
+# cycle) at run_regression_backtest.py + run_readability_backtest.py.
+from hft_contracts.atomic_io import atomic_write_binary
+
 
 # =============================================================================
 # Constants
@@ -625,15 +633,22 @@ def main():
         all_results[f"ridge_{split_name}"] = ridge_results
 
     # === Write Outputs ===
+    # FIND-NEW-04 closure (2026-05-16): atomic-write SSoT for both
+    # results.json + REPORT.md. Pre-fix `open + json.dump` and
+    # `open + f.write` were SIGKILL-corrupt — partial results.json would
+    # produce JSONDecodeError on downstream operator inspection.
+    # Sister-site closure missed by FIND-090 cycle (commit 7cfe8f5) which
+    # scoped to run_regression_backtest.py + run_readability_backtest.py.
+    # Uses atomic_write_binary because results.json requires the custom
+    # NumpyEncoder (pre-serialize to bytes, then atomic-write).
     json_path = output_path / "results.json"
-    with open(json_path, "w") as f:
-        json.dump(all_results, f, indent=2, cls=NumpyEncoder)
+    json_content = json.dumps(all_results, indent=2, cls=NumpyEncoder) + "\n"
+    atomic_write_binary(json_path, json_content.encode("utf-8"))
     log(f"\nJSON: {json_path}")
 
     report = build_report(all_results)
     md_path = output_path / "REPORT.md"
-    with open(md_path, "w") as f:
-        f.write(report)
+    atomic_write_binary(md_path, report.encode("utf-8"))
     log(f"Report: {md_path}")
 
     elapsed = time.time() - start

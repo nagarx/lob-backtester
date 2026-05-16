@@ -110,6 +110,100 @@ class TestArgparseManifestAcceptance:
             )
 
 
+class TestPy273Py274DeepItmCliWiring:
+    """#PY-273 + #PY-274 closure (2026-05-16) — Deep ITM IV CLI pass-through.
+
+    Pre-#PY-274, ``--deep-itm`` path called ``OpraCalibratedCosts.deep_itm()``
+    with no args, ignoring ``args.implied_vol`` + ``args.entry_minutes_before_close``.
+    Pre-#PY-273, the ``deep_itm()`` factory hardcoded ``implied_vol=0.40``
+    (ATM IV inheritance) — silently overestimated Deep ITM theta by 60-100%.
+
+    Post-fix:
+      * Factory keyword-only params accept CLI overrides per #PY-274
+      * Default IV for Deep ITM = 0.25 per #PY-273 (OPRA empirical Deep ITM
+        IV-skew vs ATM 0.40)
+      * CLI default = ``None`` (sentinel) → factory default fires; explicit
+        operator value wins
+
+    Tests verify (a) the new doc strings reach --help, (b) Deep ITM stdout
+    reports the corrected default IV, (c) explicit CLI override wins.
+    """
+
+    def test_deep_itm_help_text_mentions_py273_closure(self):
+        """--help text for --implied-vol mentions mode-aware factory default."""
+        result = subprocess.run(
+            [sys.executable, str(REGRESSION_SCRIPT), "--help"],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 0
+        # Updated docstring should mention mode-aware factory + #PY-273
+        assert "mode-aware factory" in result.stdout or "0.25 for Deep ITM" in result.stdout, (
+            "--implied-vol help text should mention mode-aware factory default "
+            "(0.25 for Deep ITM per #PY-273); got pre-#PY-274 text without "
+            "mode awareness"
+        )
+        assert "#PY-273" in result.stdout or "#PY-274" in result.stdout, (
+            "--implied-vol help text should cite #PY-273 or #PY-274 closure"
+        )
+
+    @pytest.mark.integration
+    def test_deep_itm_default_iv_is_025_in_stdout(self, tmp_path: Path):
+        """#PY-273: --deep-itm without --implied-vol produces IV=0.25 in mode-line."""
+        signal_dir = _construct_mock_signal_dir(tmp_path / "signals" / "test")
+        result = subprocess.run(
+            [
+                sys.executable, str(REGRESSION_SCRIPT),
+                "--signals", str(signal_dir),
+                "--name", "py273_default_iv",
+                "--exchange", "XNAS",
+                "--output-dir", str(tmp_path / "outputs"),
+                "--deep-itm",
+                "--no-zero-dte",  # skip 0DTE compute path; mode print still fires
+            ],
+            capture_output=True, text=True, timeout=120,
+        )
+        assert result.returncode == 0, (
+            f"Script failed: stdout={result.stdout[-500:]} stderr={result.stderr[-500:]}"
+        )
+        # The script prints "Mode: DEEP ITM (... IV=0.25 [#PY-273 default] ...)"
+        assert "DEEP ITM" in result.stdout
+        assert "IV=0.25" in result.stdout, (
+            f"#PY-273 default IV=0.25 not in mode line; stdout: {result.stdout[-1500:]}"
+        )
+        assert "[#PY-273 default]" in result.stdout, (
+            "Mode line should mark IV as #PY-273 factory default when CLI omitted"
+        )
+
+    @pytest.mark.integration
+    def test_deep_itm_explicit_iv_override_wins(self, tmp_path: Path):
+        """#PY-274: --deep-itm --implied-vol 0.20 propagates through factory."""
+        signal_dir = _construct_mock_signal_dir(tmp_path / "signals" / "test")
+        result = subprocess.run(
+            [
+                sys.executable, str(REGRESSION_SCRIPT),
+                "--signals", str(signal_dir),
+                "--name", "py274_explicit_iv",
+                "--exchange", "XNAS",
+                "--output-dir", str(tmp_path / "outputs"),
+                "--deep-itm",
+                "--implied-vol", "0.20",
+                "--no-zero-dte",
+            ],
+            capture_output=True, text=True, timeout=120,
+        )
+        assert result.returncode == 0, (
+            f"Script failed: stdout={result.stdout[-500:]} stderr={result.stderr[-500:]}"
+        )
+        assert "DEEP ITM" in result.stdout
+        assert "IV=0.20" in result.stdout, (
+            f"#PY-274 explicit IV=0.20 should appear in mode line; "
+            f"stdout: {result.stdout[-1500:]}"
+        )
+        assert "[CLI override]" in result.stdout, (
+            "Mode line should mark explicit CLI override (not factory default)"
+        )
+
+
 # =============================================================================
 # F1 Integration Tests — ledger-linkage record content
 # =============================================================================

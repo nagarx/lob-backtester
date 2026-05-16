@@ -547,6 +547,13 @@ def main():
     log(f"Val prices: mean={np.mean([d.prices.mean() for d in val_days]):.2f} USD")
 
     # === 0DTE Configuration ===
+    # #PY-273 closure (2026-05-16): `OpraCalibratedCosts.deep_itm()` factory
+    # default `implied_vol=0.25` now reflects OPRA empirical Deep ITM IV-skew
+    # (pre-#PY-273 inherited ATM IV=0.40, overestimating Deep ITM theta by
+    # 60-100%). This spread-signal script is a single-arm research tool — it
+    # inherits the corrected factory default without CLI override. To run a
+    # sensitivity sweep across IV values, call the factory explicitly:
+    #     OpraCalibratedCosts.deep_itm(implied_vol=<value>)
     opra_costs = OpraCalibratedCosts.deep_itm()
     zero_dte_config = ZeroDteConfig(
         enabled=True,

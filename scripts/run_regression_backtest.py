@@ -184,8 +184,31 @@ def main():
     parser.add_argument("--zero-dte", action="store_true", default=True)
     parser.add_argument("--no-zero-dte", dest="zero_dte", action="store_false")
     parser.add_argument("--commission", type=float, default=0.70)
-    parser.add_argument("--implied-vol", type=float, default=0.40)
-    parser.add_argument("--entry-minutes-before-close", type=float, default=120.0)
+    # #PY-274 closure (2026-05-16): default None means "use mode-aware factory
+    # default" (0.40 for ATM, 0.25 for Deep ITM per #PY-273). Pre-#PY-274 the
+    # CLI default was 0.40 which silently overrode the factory default of 0.25
+    # in the Deep ITM path, defeating #PY-273. Sentinel None preserves
+    # operator-explicit-override behavior: `--implied-vol 0.20` always wins.
+    parser.add_argument(
+        "--implied-vol",
+        type=float,
+        default=None,
+        help=(
+            "Annualized IV for BSM theta. Default = mode-aware factory: 0.40 "
+            "for ATM, 0.25 for Deep ITM (#PY-273 IV-skew closure 2026-05-16). "
+            "Explicit value wins."
+        ),
+    )
+    parser.add_argument(
+        "--entry-minutes-before-close",
+        type=float,
+        default=None,
+        help=(
+            "Minutes before market close at typical entry. Default = mode-aware "
+            "factory: 120.0 for both ATM and Deep ITM (14:00 ET entry). "
+            "Explicit value wins (#PY-274 closure 2026-05-16)."
+        ),
+    )
     parser.add_argument("--delta", type=float, default=0.50,
                         help="Option delta (0.50=ATM, 0.95=deep ITM)")
     parser.add_argument("--deep-itm", action="store_true", default=False,
@@ -357,19 +380,44 @@ def main():
         print(f"  Spreads: mean={spreads_data.mean():.3f}, median={np.median(spreads_data):.3f} bps")
 
     costs = CostConfig.for_exchange(args.exchange)
+    # #PY-274 closure (2026-05-16): mode-aware default resolution. CLI defaults
+    # are None (sentinel for "use factory default"); explicit operator value
+    # wins. ATM factory default = 0.40 (matches OpraCalibratedCosts());
+    # Deep ITM factory default = 0.25 (matches OpraCalibratedCosts.deep_itm()
+    # per #PY-273 closure). Pre-#PY-274 the CLI default 0.40 silently
+    # overrode the Deep ITM 0.25 factory, defeating #PY-273.
     if args.deep_itm:
-        opra_costs = OpraCalibratedCosts.deep_itm()
+        deep_itm_kwargs = {}
+        if args.implied_vol is not None:
+            deep_itm_kwargs["implied_vol"] = args.implied_vol
+        if args.entry_minutes_before_close is not None:
+            deep_itm_kwargs["entry_minutes_before_close"] = args.entry_minutes_before_close
+        opra_costs = OpraCalibratedCosts.deep_itm(**deep_itm_kwargs)
         opra_costs.commission_per_contract = args.commission
         delta = 0.95
-        print(f"  Mode: DEEP ITM (delta={delta}, half_spread=$0.005)")
+        print(
+            f"  Mode: DEEP ITM (delta={delta}, half_spread=$0.005, "
+            f"IV={opra_costs.implied_vol:.2f}"
+            f"{' [#PY-273 default]' if args.implied_vol is None else ' [CLI override]'}, "
+            f"entry_min_to_close={opra_costs.entry_minutes_before_close:.0f})"
+        )
     else:
+        atm_iv = args.implied_vol if args.implied_vol is not None else 0.40
+        atm_entry = (
+            args.entry_minutes_before_close
+            if args.entry_minutes_before_close is not None
+            else 120.0
+        )
         opra_costs = OpraCalibratedCosts(
             commission_per_contract=args.commission,
-            implied_vol=args.implied_vol,
-            entry_minutes_before_close=args.entry_minutes_before_close,
+            implied_vol=atm_iv,
+            entry_minutes_before_close=atm_entry,
         )
         delta = args.delta
-        print(f"  Mode: ATM (delta={delta}, half_spread=${opra_costs.atm_call_half_spread})")
+        print(
+            f"  Mode: ATM (delta={delta}, half_spread=${opra_costs.atm_call_half_spread}, "
+            f"IV={atm_iv:.2f}, entry_min_to_close={atm_entry:.0f})"
+        )
     zero_dte_config = ZeroDteConfig(
         enabled=args.zero_dte,
         delta=delta,

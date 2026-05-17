@@ -120,10 +120,21 @@ def main():
                         help="Number of option contracts per trade")
     parser.add_argument("--commission", type=float, default=0.70,
                         help="IBKR all-in commission per contract (USD, from 318-fill median)")
-    parser.add_argument("--implied-vol", type=float, default=0.40,
-                        help="Annualized IV for BSM theta (OPRA GreeksTracker median)")
-    parser.add_argument("--entry-minutes-before-close", type=float, default=120.0,
-                        help="Minutes before close at entry (120 = 14:00 ET)")
+    # #PY-305 closure (2026-05-17): sentinel-None mode-aware default. Pre-fix
+    # `default=0.40` hardcoded silently inherited ATM IV when operator passed
+    # `--delta 0.95` (Deep ITM) without `--implied-vol` → ~60-100% theta
+    # overstatement → readability strategy wrongly rejected at cost-floor
+    # gate. Mirrors `run_regression_backtest.py:191-211` pattern. Class-
+    # coherent fold-in (Wave 1B + pre-impl Agent Z): same treatment for
+    # `--entry-minutes-before-close` — also silently inherited stale defaults
+    # post FIND-NEW-01 calibration cycle. Resolution at L184 below.
+    parser.add_argument("--implied-vol", type=float, default=None,
+                        help="Annualized IV for BSM theta. None → mode-aware "
+                             "default: 0.25 if --delta >= 0.90 (Deep ITM) "
+                             "else 0.40 (ATM). Explicit value overrides.")
+    parser.add_argument("--entry-minutes-before-close", type=float, default=None,
+                        help="Minutes before close at entry. None → 120.0 "
+                             "(default mid-day entry; 14:00 ET).")
 
     parser.add_argument("--output-dir", type=str, default="outputs/backtests/")
     parser.add_argument("--manifest", type=str, default=None,
@@ -175,6 +186,22 @@ def main():
 
     args = parser.parse_args()
 
+    # #PY-305 closure (2026-05-17): mode-aware default resolution.
+    # CLI defaults are None (sentinel for "use mode-derived default");
+    # explicit operator value wins. ATM (delta < 0.90) → IV=0.40 (matches
+    # OpraCalibratedCosts class default); Deep ITM (delta >= 0.90) → IV=0.25
+    # (matches OpraCalibratedCosts.deep_itm() factory per #PY-273 closure).
+    # Class-coherent with `run_regression_backtest.py:389-415` pattern.
+    # Note: this script constructs OpraCalibratedCosts DIRECTLY at L260+
+    # (no `--deep-itm` flag like the regression script); the mode-aware
+    # default just sets the right IV before construction.
+    _iv_override = " [CLI override]" if args.implied_vol is not None else ""
+    if args.implied_vol is None:
+        args.implied_vol = 0.25 if args.delta >= 0.90 else 0.40
+        _iv_override = " [#PY-305 mode-aware default]"
+    if args.entry_minutes_before_close is None:
+        args.entry_minutes_before_close = 120.0
+
     # FIND-NEW-01 closure (2026-05-16): derive effective events_per_minute.
     # Only required when --zero-dte enabled.
     # MF-2 (LOW, mid-impl gate): explicit Optional[float] annotation matches
@@ -224,6 +251,12 @@ def main():
           f"spread<={args.max_spread_bps}")
     print(f"  Holding: {holding_policy.policy_name}")
     print(f"  Cooldown: {args.cooldown} events")
+    # #PY-305 closure (2026-05-17): operator-facing mode line. Shows the
+    # resolved IV + entry-minutes-before-close + delta so operator can
+    # verify mode-aware default fired correctly. `_iv_override` tag set
+    # at L198+L201 distinguishes CLI explicit override vs mode-aware default.
+    print(f"  Mode: delta={args.delta}, IV={args.implied_vol:.2f}{_iv_override}, "
+          f"entry_min_to_close={args.entry_minutes_before_close:.0f}")
 
     metadata_path = signal_dir / "signal_metadata.json"
     signal_metadata = {}

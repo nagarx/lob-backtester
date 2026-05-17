@@ -257,9 +257,17 @@ class BacktestResult:
 
     @property
     def total_return(self) -> float:
-        """Total return: (final - initial) / initial."""
+        """Total return: (final - initial) / initial.
+
+        Wave 1C T1.1 + Wave 1F + Z fold-in closure (2026-05-17): align with
+        `TotalReturn` metric (returns NaN on undefined) per Phase X.3
+        NaN-sentinel convention. Pre-fix returned silent 0.0 on
+        ``initial_capital == 0`` — indistinguishable from "legitimate 0%
+        return". Now returns NaN on degenerate input. Sister of
+        `max_drawdown` property fix below.
+        """
         if self.initial_capital == 0:
-            return 0.0
+            return float("nan")
         return (self.final_equity - self.initial_capital) / self.initial_capital
 
     @property
@@ -269,9 +277,20 @@ class BacktestResult:
 
     @property
     def max_drawdown(self) -> float:
-        """Maximum drawdown as a fraction (0 to 1)."""
+        """Maximum drawdown as a fraction (0 to 1).
+
+        Wave 1C T1.1 closure (2026-05-17): align with `MaxDrawdown` metric
+        at `risk.py:294-322` which returns NaN on empty equity. Pre-fix this
+        property returned silent 0.0 on degenerate inputs while the metric
+        returned NaN — same backtest reported TWO different drawdown values
+        via the two access paths. `BacktestResult.summary()` reads this
+        property; `BacktestStats(...).summary()` reads the metric. Operator
+        inspecting the property saw "no drawdown" on a broken/zero-trade run
+        while the metric correctly flagged "undefined" (REJECT-FALSE risk).
+        Phase X.3 NaN-sentinel convention applied: empty equity → NaN.
+        """
         if len(self.equity_curve) == 0:
-            return 0.0
+            return float("nan")
         peak = np.maximum.accumulate(self.equity_curve)
         drawdown = (peak - self.equity_curve) / peak
         # Handle division by zero when peak is 0

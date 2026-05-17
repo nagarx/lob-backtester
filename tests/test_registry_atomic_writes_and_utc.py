@@ -115,9 +115,15 @@ class TestFind090AtomicWrites:
 
 
 class TestFind093UtcTimestamps:
-    """FIND-093: registry uses datetime.now(timezone.utc), not local TZ."""
+    """FIND-093: registry uses datetime.now(timezone.utc), not local TZ.
 
-    _RUN_ID_TIMESTAMP_RE = re.compile(r"_(\d{8}_\d{6})$")
+    Wave 2-H H1 closure (2026-05-17): regex extended to allow
+    `_[0-9a-f]{8}` suffix from `secrets.token_hex(4)` collision-resistant
+    appendix. The timestamp capture group stays at index 1 (UTC bracket
+    check unchanged); the suffix is consumed by the trailing pattern.
+    """
+
+    _RUN_ID_TIMESTAMP_RE = re.compile(r"_(\d{8}_\d{6})_[0-9a-f]{8}$")
     _ISO_UTC_RE = re.compile(r".*\+00:00$|.*Z$")
 
     def test_run_id_timestamp_is_within_utc_range(
@@ -136,7 +142,10 @@ class TestFind093UtcTimestamps:
         after_utc = datetime.now(timezone.utc)
 
         match = self._RUN_ID_TIMESTAMP_RE.search(run_id)
-        assert match is not None, f"run_id {run_id!r} must end in _YYYYMMDD_HHMMSS"
+        assert match is not None, (
+            f"run_id {run_id!r} must end in _YYYYMMDD_HHMMSS_<8hex> "
+            f"(Wave 2-H H1 collision-resistant suffix; 2026-05-17)"
+        )
         run_id_dt = datetime.strptime(match.group(1), "%Y%m%d_%H%M%S").replace(
             tzinfo=timezone.utc
         )

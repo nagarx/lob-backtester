@@ -124,14 +124,32 @@ class RegressionStrategy(Strategy):
         else:
             unrealized_pnl_bps = 0.0
 
-        pred_class = self.label_mapping.up if self.predictions_bps[i] > 0 else self.label_mapping.down
+        # Wave 1D T1-D-003 closure (2026-05-17): NaN guard on pred_class
+        # derivation. Pre-fix `NaN > 0` evaluated False (IEEE 754) → silently
+        # picked `down` → DirectionReversalPolicy detected false reversal →
+        # unintended early EXIT on garbage signal. _build_holding_state is
+        # called mid-hold for every i where in_position; mid-hold NaN
+        # injection is plausible (price-stream gap from feature-extractor).
+        # Fail-CLOSED: NaN → use stable (no-reversal-trigger) sentinel.
+        # The entry-gate at L107 already guards against entering on NaN
+        # (PRESERVE #25); this fix prevents NaN-induced phantom exits in-hold.
+        pred = self.predictions_bps[i]
+        if not np.isfinite(pred):
+            pred_class = self.label_mapping.stable
+        elif pred > 0:
+            pred_class = self.label_mapping.up
+        else:
+            pred_class = self.label_mapping.down
+
+        # Confirmation similarly NaN-guarded: |NaN| / 20.0 = NaN propagates.
+        confirmation = abs(pred) / 20.0 if np.isfinite(pred) else 0.0
 
         return HoldingState(
             events_held=i - entry_idx,
             entry_prediction=pred_class,
             current_prediction=pred_class,
             current_agreement=1.0,
-            current_confirmation=abs(self.predictions_bps[i]) / 20.0,
+            current_confirmation=confirmation,
             current_spread=float(self.spreads[i]) if self.spreads is not None else 0.0,
             entry_price=float(entry_price),
             current_price=float(current_price),

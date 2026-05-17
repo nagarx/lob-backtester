@@ -13,6 +13,7 @@ Design:
 
 import json
 import logging
+import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -123,8 +124,22 @@ class BacktestRegistry:
         # (hft-contracts.timestamp_utils + Phase A.5.1 ISO-8601 SSoT).
         # `run_id` uses strftime without tz suffix — UTC value still serializes
         # deterministically (e.g., "20260515_142030") matching prior format.
+        #
+        # Wave 2-H H1 closure (2026-05-17): append 8-hex collision-resistant
+        # suffix via `secrets.token_hex(4)`. Pre-fix two `register()` calls
+        # within the same wall-clock second produced identical `run_id` →
+        # `run_dir.mkdir(parents=True, exist_ok=True)` did NOT error → the
+        # second call's `atomic_write_json(result.json)` SILENTLY OVERWROTE
+        # the first call's artifact + `_index[run_id]` dict-key assignment
+        # also overwrote first record. Real for parametric sweeps registering
+        # multiple variants quickly + orchestrated hft-ops sweep calling at
+        # high rate. Closely matches the `aeec3b0` parallel-session
+        # anti-pattern flagged in MEMORY.md ACTIVE banner. 4-byte token →
+        # 8 hex chars → ~4.3 billion-way collision space within same second.
         now_utc = datetime.now(timezone.utc)
-        run_id = f"{name}_{now_utc.strftime('%Y%m%d_%H%M%S')}"
+        run_id = (
+            f"{name}_{now_utc.strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(4)}"
+        )
         run_dir = self.base_dir / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
 

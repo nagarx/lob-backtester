@@ -319,6 +319,25 @@ class ZeroDteConfig:
             raise ValueError(f"max_holding_minutes must be > 0, got {self.max_holding_minutes}")
         if self.contracts_per_trade < 1:
             raise ValueError(f"contracts_per_trade must be >= 1, got {self.contracts_per_trade}")
+        # Wave 2-H H3 + Wave 1A F2 closure (2026-05-17): fail-loud on
+        # `prefer_calls=False`. The option-P&L formula at
+        # engine/zero_dte.py:354-375 hardcodes ATM-call-like delta sign;
+        # selecting PUT spread cost via is_call flag is inconsistent with the
+        # P&L direction formula. Currently latent (all production YAMLs +
+        # tests use prefer_calls=True, verified via grep), but reachable via
+        # Python API. Raising at construction prevents silent-wrong-result
+        # exposure per hft-rules §5 fail-fast + §8 never silently produce
+        # incoherent semantics. See #PY-311 for full PUT delta sign-convention
+        # plumbing (4-6 hr Phase Z architectural; deferred).
+        if not self.prefer_calls:
+            raise ValueError(
+                "ZeroDteConfig: prefer_calls=False is not yet supported. The "
+                "option-P&L formula at engine/zero_dte.py:354-375 is "
+                "ATM-call-only; PUT delta sign convention is not wired through "
+                "Trade dataclass. Selecting prefer_calls=False would produce "
+                "mathematically incoherent option-P&L (PUT spread cost paired "
+                "with CALL-like P&L direction). See #PY-311 (Phase Z deferred)."
+            )
         # FIND-NEW-01 closure (2026-05-16): mutex + type + non-negative
         # validation on sampling-cadence fields. Both can be None (operator
         # passes events_per_minute directly at ZeroDtePnLTransformer

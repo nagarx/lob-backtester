@@ -24,6 +24,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import List, Optional
 
+import numpy as np
+
 from lobbacktest.labels import LabelMapping, SHIFTED_MAPPING
 
 
@@ -148,7 +150,16 @@ class DirectionReversalPolicy(HoldingPolicy):
         if reversed_direction:
             return True
 
-        if self.require_gate and state.current_agreement < 1.0:
+        # Wave 1D T1-D-001 closure (2026-05-17): NaN guard on current_agreement
+        # mirrors entry-gate NaN-guard convention (PRESERVE #25). Pre-fix
+        # `NaN < 1.0` evaluated False (IEEE 754) → gated-exit branch silently
+        # did nothing on broken agreement signal → strategy continued holding
+        # on undefined data. Fail-CLOSED: NaN treated as "below 1.0" → exit
+        # the position (defensive). Symmetric with 14-site entry-gate fix at
+        # PRESERVE #25 (post-#PY-71+FIND-046+HF-3 closure 2026-05-15).
+        if self.require_gate and (
+            not np.isfinite(state.current_agreement) or state.current_agreement < 1.0
+        ):
             return True
 
         return False
@@ -194,6 +205,18 @@ class StopLossTakeProfitPolicy(HoldingPolicy):
 
     def should_exit(self, state: HoldingState) -> bool:
         if state.events_held >= self.max_hold_events:
+            return True
+        # Wave 1D T1-D-002 closure (2026-05-17): NaN guard on
+        # unrealized_pnl_bps before SL/TP comparisons. Pre-fix
+        # `NaN <= -stop_loss` AND `NaN >= take_profit` BOTH evaluated False
+        # (IEEE 754) → SL/TP never fired → position rode indefinitely on
+        # broken-PnL state. This was the MOST OPERATIONALLY DANGEROUS NaN
+        # bypass identified by Wave 2-G (CLI-reachable via
+        # --holding-type stop_loss_take_profit). NaN injection path:
+        # regression.py:122-125 — if current_price is NaN, price_change_bps
+        # is NaN → unrealized_pnl_bps is NaN. Fail-CLOSED: NaN → force exit
+        # (mirrors entry-gate convention PRESERVE #25).
+        if not np.isfinite(state.unrealized_pnl_bps):
             return True
         if state.unrealized_pnl_bps <= -self.stop_loss_bps:
             return True

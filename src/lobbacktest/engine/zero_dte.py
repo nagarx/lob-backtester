@@ -210,6 +210,25 @@ class ZeroDteAlternationError(ValueError):
     """
 
 
+class ZeroDteDegenerateInputError(ValueError):
+    """Raised when ZeroDtePnLTransformer detects a degenerate input price.
+
+    #PY-312 (closed 2026-05-19): pre-fix `entry_price ≤ EPS` (corrupt signal
+    with `price=0.0` or negative) silently produced `move_bps=0.0` and
+    a phantom-loss trade (zero gross PnL but spread+commission+theta costs
+    still subtracted). Violated hft-rules §8 (never silently drop / clamp /
+    fix data without recording diagnostics).
+
+    Post-fix: degenerate input raises this exception with actionable context
+    (trade index + entry_price value). Mirrors `ZeroDteAlternationError`
+    pattern. Per pre-impl gate APPROVE-WITH-MICRO-FIX 2026-05-19, NO diagnostic
+    counter (defer — would require ZeroDteResult schema extension with
+    cross-module consumer breakage).
+
+    See `PHASE_P_BACKLOG.md` #PY-312 + `POST_HFT_OPS_AUDIT_2026_05_19.md` §4.1.
+    """
+
+
 class ZeroDtePnLTransformer:
     """
     Transforms equity backtest trades into IBKR+OPRA-calibrated 0DTE option P&L.
@@ -369,7 +388,18 @@ class ZeroDtePnLTransformer:
                 direction = 1 if entry_trade.side.value > 0 else -1
                 move_bps = direction * (exit_price - entry_price) / entry_price * 10000.0
             else:
-                move_bps = 0.0
+                # #PY-312 (closed 2026-05-19): fail-loud on degenerate entry_price
+                # per hft-rules §8 (no silent drop/clamp/fix). Pre-fix silently
+                # set move_bps=0.0 → phantom-loss trade (zero gross PnL but
+                # spread+commission+theta still subtracted).
+                raise ZeroDteDegenerateInputError(
+                    f"ZeroDtePnLTransformer: entry_price={entry_price} <= EPS={EPS} "
+                    f"at trade idx={i} (entry_trade.index={entry_trade.index}). "
+                    f"Corrupt signal — likely from upstream nan_to_num or "
+                    f"zero-priced asset. Per hft-rules §8 + #PY-312 closure 2026-05-19, "
+                    f"this fails loud instead of producing phantom-loss trade with "
+                    f"silently-clamped move_bps=0.0."
+                )
             underlying_moves_arr[i] = move_bps
 
             gross_pnl = delta * (move_bps / 10000.0) * entry_price * 100 * contracts

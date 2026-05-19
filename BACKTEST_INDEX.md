@@ -1642,3 +1642,91 @@ Per Cycle 10 EXPERIMENT_INDEX entry decision matrix:
 - Sweep launch BG task: `bkl9m5k18` (Bash) completed exit 0 at 13:32 CEST 2026-05-19
 - Closes: #PY-307 + #PY-308 BUG2-A; Files: #PY-316
 - Prior R-19 cycle bridge: Round 19a (same architecture; PRE-BUG2A + PRE-FIND-NEW-01; single seed=42)
+
+---
+
+## Round 20: R-20 HMHP-R Architecture-Axis Test on e5_60s_v3p0 (PARTIAL-COMPETITIVE-NOT-TRADEABLE, 2026-05-19 NIGHT)
+
+### Cycle 12 context
+
+R-20 cycle on `e5_timebased_60s_v3p0` corpus (98 features, 230 days, H=[10,60,300]) testing HMHP-R cascading-multi-horizon regressor architectural lift vs TLOB Stage 2 baseline. Pre-impl Wave 1+2 (4 parallel agents) REFRAMED original "R-20 HMHP single-horizon TB v3p0" recommendation INFEASIBLE (HMHPConfig N≥2 validator + 1-D TB labels + Tuple return + lessons #1440 + #1450 HMHP×TB twice-refuted) → pivoted to HMHP-R × regression on Stage-6-validated infrastructure. Single-seed (R-17a/R-19/Stage 6 protocol parity).
+
+### Methodology
+
+- **Architecture**: HMHP-R = TLOB encoder (hidden=64, 2 layers) + cascading regression decoders [H10/H60/H300] (hidden=32, state_dim=32, gate fusion) + RegressionConfirmationModule + Phase S pool_mode=mean. 169,239 params (matches Stage 6 exact).
+- **Loss**: Huber regression with `regression_loss_delta=12.6` (60s bin H10 kurtosis≈26.5 → δ=12.6 bps per CLAUDE.md Huber δ calibration table + E5 precedent).
+- **Loss weights**: H10:0.50 + H60:0.25 + H300:0.15 + consistency:0.10 (Stage 6 exact, H10-primary).
+- **Training**: 100 epochs / patience=15 / seed=42 / batch=64 / lr=1e-4 / cosine scheduler / num_workers=0 (OOM-on-fork guard). Wall-clock: 1,405.9s (~23.4 min total incl. signal export + backtest).
+- **Test split**: 33 days (8,085+ test samples per Stage 6 baseline).
+- **Cost model anchor**: POST-HF-1 (IV=0.25 Deep ITM via mode-aware factory `OpraCalibratedCosts.deep_itm()`; HF-1 commit `175307c` shipped 2026-05-16 LATE NIGHT).
+
+### Per-threshold results (8-threshold cost-aware sweep; ALL NEGATIVE)
+
+| Threshold | OptRet | WinRate | AvgPnL | N_trades | Sharpe | SortinoRatio | MaxDD | Expectancy |
+|---|---|---|---|---|---|---|---|---|
+| deep_itm_1.4bps | **-6.08%** | 42.54% | -8.56 | 710 | -25.84 | -35.01 | 6.11% | -8.37 |
+| itm_2bps | -7.44% | 44.78% | -10.64 | 699 | -26.07 | -33.75 | 6.76% | -9.43 |
+| itm_3bps | -8.95% | 43.24% | -13.16 | 680 | -29.52 | -34.22 | 7.44% | -10.80 |
+| atm_5bps | -7.99% | 40.91% | -12.98 | 616 | -27.25 | -- | -- | -- |
+| high_conv_8bps | -7.36% | 40.59% | -15.57 | 473 | -26.28 | -- | -- | -- |
+| **very_high_10bps (BEST)** | **-4.40%** | 41.43% | -12.58 | 350 | -19.63 | -- | -- | -- |
+| ultra_conv_15bps | 0.00% | -- | 0.00 | 0 (degenerate) | nan | -- | -- | -- |
+| max_conv_20bps | 0.00% | -- | 0.00 | 0 (degenerate) | nan | -- | -- | -- |
+
+### Headline metrics
+
+- **Best OptRet**: -4.40% (very_high_10bps; 350 trades; WinRate 41.43%)
+- **Reference (deep_itm_1.4bps)**: -6.08% / 42.54% WR / -25.84 Sharpe
+- **Mean OptRet across 6 active thresholds**: -7.04% (no threshold positive)
+- **Trade count range**: 350-710 trades across active thresholds (8-18% trade rate)
+
+### Comparison vs Stage 6 (HMHP-R smoke @ 20 epochs) and R-19 (TLOB×TB)
+
+| Metric | R-20 (HMHP-R, 100ep) | Stage 6 (HMHP-R, 20ep) | TLOB Stage 2 (98feat regression) | R-19 (TLOB×TB) |
+|---|---|---|---|---|
+| test_h10_ic | 0.3670 | 0.3561 | 0.3747 | n/a (classification) |
+| Best OptRet | -4.40% (very_high_10bps) | (not backtested in Stage 6 record) | (E5 60s round results) | -3.11% PRE-HF-1 |
+| Architecture | HMHP-R cascade | HMHP-R cascade | TLOB | TLOB |
+| Corpus | e5_60s_v3p0 | e5_60s_v3p0 | e5_60s_v3p0 | nvda_v3p0_tb_pt40_sl20_h30 |
+
+R-20's PARTIAL-COMPETITIVE H10 IC (-0.77pp vs TLOB) does NOT translate to backtest tradeability. The cascading multi-horizon architecture preserves H10 predictive power within 5pp of TLOB but provides no additional tradeable signal at any cost threshold. **Same E8 label-execution-mismatch holds** — model predicts smoothing residual, not point-direction.
+
+### ConfirmationModule degeneracy (NEW FINDING)
+
+The RegressionConfirmationModule produces near-degenerate cross-horizon agreement:
+- mean(agreement_ratio) = **0.9974** (H4.b PASS band was [0.4, 0.9] — FAIL)
+- std(agreement_ratio) = **0.0295** (H4.c min was 0.05 — FAIL)
+
+Interpretation: H10/H60/H300 decoder heads agree on direction on ~99.74% of test samples with near-constant variance. Either (a) smoothed labels at these short horizons are highly autocorrelated → cross-horizon predictions naturally agree (semantic finding); OR (b) cascade architectural feature collapse — state-passing from H10 dominates downstream decoders (architectural finding). Either interpretation: ConfirmationModule provides ZERO additional discriminative signal on this corpus + label type combination.
+
+### Phase Y composability
+
+- `compatibility_fingerprint`: `0ccd9f90bca06c868607b6520653e195d909a7fe6083a7aa29e7b8e02c2be160` (matches γ-1 LITE 2026-05-10 "ridge × smoothed × H10" anchor; CORPUS IDENTITY preserved through schema evolution 2026-05-05→2026-05-19)
+- `experiment_provenance_hash`: `9c28e966ba45df4214c24e6bbee0ada2c54b87cdbd6357a10ef910ba045d08a1` (POPULATED — Phase Y composer end-to-end functional on HMHP-R production)
+- `model_config_hash` (nested): `be5ab20ae5d2b3675d0c1d35762a0102192fcc6e892e60cbd06c143bee1f6154` (differs from Stage 6's `53041488...` because epochs+patience+FeatureSet+num_workers axes rotated per `_LOSS_TUNING_KEYS` semantics; OBSERVATIONAL per H3.b gate design)
+- `feature_set_ref`: `{name: nvda_short_term_98_src98_v1, content_hash: 122fe5cbfb657bf91...}` (closes Phase Y composer feature_set_content_hash gap)
+
+### Verdict & Decision
+
+**Empirical verdict**: **PARTIAL-COMPETITIVE-NOT-TRADEABLE** with NEW ConfirmationModule degeneracy finding.
+
+- Architectural axis: HMHP-R cascade is **competitive within 5pp** of TLOB at H10 (0.3670 vs 0.3747) but does NOT clear-lift. H1.b PASS, H1.c FAIL. Closes architecture-axis question for this corpus + label combination.
+- Multi-horizon capture: PASS — H60_ic=0.1303, H300_ic=0.0818 confirm signal at all 3 horizons (within ±15% of Stage 6 anchors).
+- Tradeability: ALL 8 thresholds NEGATIVE OptRet (best -4.40%). Same E8 label-execution-mismatch persists. Closing tradeability question via cost-aware barrier sweep would require Phase Z #PY-271 (BSM moneyness) + new corpus with point-return labels.
+- ConfirmationModule: NEW FINDING — near-degenerate (~0.9974 agreement; ~0.0295 std). Pre-compute expected baseline before next HMHP-R cycle (Lesson L51).
+
+**Direction outcome**: Architecture-axis CLOSED for HMHP-R cascade on v3p0 smoothed-return regression. Cascading-confirmation does not extract additional H10 signal beyond TLOB encoder + flatten. Multi-horizon decoders do successfully capture H60+H300 signal but ConfirmationModule on this corpus is degenerate.
+
+### Cross-references
+
+- Backtest output: `lob-backtester/outputs/backtests/cycle12_r20_hmhp_r__seed_42.json` (registry index updated)
+- Per-trade artifacts: 6 `option_trade_pnls__<threshold>.npy` files (deep_itm_1.4bps / itm_2bps / itm_3bps / atm_5bps / high_conv_8bps / very_high_10bps) at `lob-backtester/outputs/backtests/` via FIND-090 atomic-write SSoT
+- Companion EXPERIMENT_INDEX entry: `lob-model-trainer/EXPERIMENT_INDEX.md` "Cycle 12: R-20 HMHP-R Architecture-Axis Test"
+- Verdict JSON: `hft-ops/ledger/r20_verdicts/cycle12_r20_hmhp_r_20260519T184402_verdict_20260519T191131.json`
+- Sweep manifest: `hft-ops/experiments/sweeps/cycle12_r20_hmhp_r.yaml`
+- Training record: `hft-ops/ledger/records/cycle12_r20_hmhp_r__seed_42_20260519T190728_5d186966.json`
+- Sweep launch BG task: `b1ufwlitb` (Bash) completed exit 0 (1,405.9s = 23.4 min) at 19:07 CEST 2026-05-19
+- Analyzer: `hft-ops/scripts/analyze_r20_hmhp_r.py` (set-based CORPUS_COMPAT_FP_ANCHORS frozenset per L49 anchor staleness)
+- Prior Stage 6 bridge: `lob-model-trainer/EXPERIMENT_INDEX.md` "Stage 6: HMHP-R v3p0 Validation" (2026-05-05 reference; 20-epoch smoke + Phase S + Phase Y validation)
+- Prior γ-1 LITE bridge: CLAUDE.md γ-1 LITE 12-arm sweep table — "ridge × smoothed × H10" compat_fp `0ccd9f90bca06c86...` (2026-05-10 multi-arm cycle) = R-20's compat_fp (corpus identity anchor)
+- Prior cycle bridges: Cycle 11 hygiene 2026-05-19 NIGHT (predecessor cycle; F-1+F-2+#PY-312 closures + r19 golden fixtures + bimodality verdict)

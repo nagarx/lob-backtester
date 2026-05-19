@@ -1548,3 +1548,97 @@ TLOB confidence distribution is slightly LOWER (tighter at P25) than Logistic �
 - **Lesson #102**: **TLOB compact-config (130K) is parameter-EFFICIENT on TB v3p0** vs R9 (TLOB compact 92K on smoothed-return) which produced IC=0.3747 directly. TB labels carry SIGNIFICANTLY less linear signal than smoothed-return — TLOB attention finds non-linear interactions but the TB-vs-smoothed signal density gap is much larger than the architectural lift.
 - **Lesson #103**: **`tlob_num_heads=1` empirically validated for compact-config**: paper canonical setting per #PY-236 (closes original CLAUDE.md banner gcd math error). At `hidden_dim=40 × num_heads=1` → embed_dim=40, feature-attention block at `tlob.py:166-173` divides cleanly. Training stable across 26 epochs.
 - **Lesson #104 (NEW verdict-label encoded)**: **REFUTE-WITH-ARCHITECTURAL-LIFT** is a NEW classification beyond simple GO/REFUTE/INDETERMINATE/ABORT. Apply when (a) H1 PRIMARY fails AND (b) H2 BASELINE passes AND (c) the H2 margin materially exceeds the prior-architecture's H2 margin AND (d) H5 ARCHITECTURAL passes. The cycle CLOSES the architectural-ceiling hypothesis (lift IS available) but REFUTES the profitability hypothesis (lift insufficient to close cost gap). Use in future cycles where architectural axis is varied on a previously-REFUTED experiment.
+
+---
+
+## Round 19b — TLOB × TB v3p0 Multi-Seed N=5 (Cycle 10 / #PY-243; GO-ARCHITECTURAL + INDETERMINATE-COMMERCIAL, 2026-05-19)
+
+**Run names**: 5 backtests at `lob-backtester/outputs/backtests/cycle10_r19_multi_seed__seed_{43..47}_*/`
+
+**Sweep ID**: `cycle10_r19_multi_seed_20260518T222513` (5 cells × {training, signal_export, backtesting}; 0 failed; durations 4080-5130s per cell; total compute ~22,709s ≈ 6.3 hours unattended)
+
+**Signals**: `outputs/experiments/seed_{43..47}/signals/test/` (17,480 samples per seed; Phase 1 sklearn adapter consumed cleanly with synthetic agreement_ratio = 1.0)
+
+**Checkpoints**: `hft-ops/ledger/runs/cycle10_r19_multi_seed_20260518T222513/checkpoints/best.pt` (one shared sweep dir; seed_43 best epoch 15 val_loss=0.3648)
+
+**Corpus**: `data/exports/nvda_v3p0_tb_pt40_sl20_h30/` (233 days NVDA XNAS / 129,912 sequences; θ_PT=40 bps / θ_SL=20 bps / τ_max=30 bins; identical to Round 17a + Round 19a)
+
+**Compatibility FP (NEW POST-BUG2A anchor)**: `8f1148de02ad446efdcd613a3c05b00b55439740d48c03101978eaf2a5c2c353` (5 IDENTICAL across seeds; differs from R-19's PRE-BUG2A anchor `dd21d07922809691...` ONLY by `feature_layout` field — registry-tag `"default"` → content-hash `122fe5cbfb657bf91...` per `compatibility.py:228-232` BUG2-A closure mechanism; other 10 SHAPE-determining fields byte-identical proving corpus is the SAME)
+
+**Model config hash**: `2dc7eeef5192db921ed348364fb4c76fbc5e3e917a69929791e016a99ee16a0e` (5 IDENTICAL; matches R-19 anchor — TLOB compact-config `tlob_hidden_dim=40 × tlob_num_layers=4 × tlob_num_heads=1 × tlob_use_bin=true`, 130,296 params)
+
+**Experiment provenance hash**: `27244be31b8af3744dcd1c10c2004fd1bf6609417ddac7ae7d388f4b02aeda5d` (5 IDENTICAL — Phase Y composer is TREATMENT-LEVEL by design; see Lesson L43 in EXPERIMENT_INDEX cycle 10 entry)
+
+### Backtester invocation
+
+```bash
+# Per-seed pattern (5 invocations, identical except --signals path):
+python scripts/run_readability_backtest.py \
+    --signals ../outputs/experiments/seed_43/signals/test \
+    --name cycle10_r19_multi_seed__seed_43 \
+    --exchange XNAS \
+    --primary-horizon-idx 0 \
+    --min-confidence 0.40 \
+    --bin-seconds 60                       # ← NEW post FIND-NEW-01 closure 2026-05-16 morning
+```
+
+**Cost model**: ATM mode (delta=0.5, prefer_calls=True, implied_vol=0.4, atm_call_half_spread=$0.015, commission_per_contract=$0.70 / round-trip $1.40). Mode is SAME as R-19's original Round 19a (also delta=0.5/IV=0.4 — verified via direct read of R-19's result.json config).
+
+**METHODOLOGY ASYMMETRY vs Round 19a** (cite explicitly per "cross-cycle comparison" discipline):
+
+| Axis | R-19 (Round 19a, single seed 2026-05-15) | Cycle 10 R-19 Multi-Seed (Round 19b, 2026-05-19) |
+|---|---|---|
+| CLI: `--hold-events` | 30 (passed) | NOT passed (default holding policy) |
+| CLI: `--min-agreement` | 1.0 (passed) | NOT passed (default) |
+| CLI: `--holding-type` | horizon_aligned (passed) | NOT passed (default) |
+| CLI: `--zero-dte` | passed explicit | default-enabled |
+| events_per_minute | **10.0 PRE-FIND-NEW-01** (bug) | **1.0 POST-FIND-NEW-01** (correct for 60s bins) |
+| Resulting hold duration | 30 events / 10.0 evt/min = 3 min | 30 events / 1.0 evt/min = 30 min |
+| Resulting theta cost | $1.27/trade (3-min hold) | $4.23/trade (30-min hold) — **3.3x R-19's reported theta** |
+| Resulting trade count | 322 round-trips | mean 1232 (3.8x R-19) — default holding policy completes more cycles |
+
+**Implications**: R-19's reported OptRet=-3.11% was PRE-FIND-NEW-01 + with explicit `--hold-events 30`. Cycle 10 R-19 multi-seed OptRet=-5.70% is POST-FIND-NEW-01 + with default holding. Direct OptRet comparison is NOT clean (cost methodology + holding-policy methodology both differ). PT_precision IS the only cleanly comparable metric (training-time confusion matrix; cost-model-independent).
+
+### Per-seed performance
+
+| Seed | Total Trades | Equity Return | WinRate (equity) | Option Return | Option WinRate | Avg Theta | Max Drawdown |
+|---|---|---|---|---|---|---|---|
+| 43 | 1450 | **-4.64%** | 40.55% | **-6.26%** | 36.14% | $4.23 | 4.77% |
+| 44 | 1160 | -4.61% | 39.31% | -5.69% | 36.38% | $4.23 | 4.76% |
+| 45 | 1040 | **-3.96%** | **41.15%** | **-5.05%** | **37.50%** | $4.23 | **4.11%** |
+| 46 | 1250 | -4.19% | **41.76%** | -5.38% | **37.92%** | $4.22 | 4.34% |
+| 47 | 1260 | -4.68% | 39.21% | -6.11% | 35.40% | $4.22 | 4.82% |
+| **Mean ± SD** | **1232 ± 156** | **-4.41% ± 0.31%** | **40.40% ± 1.08%** | **-5.70% ± 0.50%** | **36.67% ± 1.05%** | **$4.23 ± $0.005** | **4.56% ± 0.31%** |
+
+**Tight cross-seed variance** (option_return std = 0.50%, ~9% of mean magnitude) confirms seed-stability of the backtest at the realized-P&L level (independent of the training-time PT precision bimodality).
+
+### Verdict: GO-ARCHITECTURAL + INDETERMINATE-COMMERCIAL (DUAL)
+
+Per Cycle 10 EXPERIMENT_INDEX entry decision matrix:
+- **ARCHITECTURAL**: R-19 +4.9pp PT precision lift SURVIVES N=5 seed perturbation (mean PT precision 0.2639 ± 0.020 closely tracks R-19 anchor 0.269 within 0.5pp; CI lower 0.2488 cleanly above R-17a baseline 0.220). **GO-CONFIRMED**.
+- **COMMERCIAL**: Backtest OptRet -5.70% ± 0.50% across all 5 seeds. The architectural lift is INSUFFICIENT to clear cost-economics floor at 40/20 bps barrier × ATM 0DTE cost model. Confirms prior Wilson+McNemar verdict from commit `b84897a` (mean diff +0.0492 vs cost-floor 0.05; -0.08pp shortfall). **INDETERMINATE-COST-INSUFFICIENT-CONFIRMED**.
+
+### Encoded lessons (chain from R-19 Lessons #99-104; full text in EXPERIMENT_INDEX cycle 10 entry)
+
+- **Lesson #105**: R-19 +4.9pp architectural lift is ROBUST to seed variance; Architectural Lesson #12 (multi-seed mandate) CLOSED for R-19 corpus + TLOB architecture
+- **Lesson #106**: Wilson+McNemar cost-floor verdict from `b84897a` HOLDS regardless of seed-variance robustness; no architecture in Ridge/Logistic/TLOB class is commercially tradeable at this barrier scale
+- **Lesson #107**: Bimodality in TLOB+focal training regime — 2 aggressive-PT seeds (8K+ predictions, 0.24 precision) vs 3 conservative-PT seeds (3.8-4.8K predictions, 0.28 precision); R-19's seed=42 was in the conservative regime
+- **Lesson L43** (NEW Architectural Lesson, paired with L42 session-pivot): pre-registered fingerprint-identity gates need re-capture after architectural fixes (BUG2-A); Phase Y / dedup / pred_sha are ORTHOGONAL fingerprint mechanisms
+- **Lesson L44** (NEW Architectural Lesson): Phase Y composer docstring should include explicit "**INTENTIONALLY seed-invariant**" statement; PA §17.3 should document 3-fingerprint orthogonality
+
+### Outstanding work (Round-19b specific)
+
+- **Round 19c NEXT candidate**: cycle 10 backtest re-run with explicit `--hold-events 30` + `--min-agreement 1.0` + `--holding-type horizon_aligned` (mirror R-19 Round 19a CLI) — would close the methodology asymmetry but is INFORMATIONAL only (OptRet remains negative regardless; cost-economics gap is the binding constraint per Lesson #106). ~30 min wall-clock. Probably NOT worth shipping vs higher-EV alternatives.
+- **Round 20 NEXT candidate**: HMHP cascade on TB v3p0 corpus (R-20 in EXPERIMENT_INDEX) — same Phase Y trust columns apply; same backtest configuration; tests architecture-axis HMHP vs TLOB.
+- **Bimodality-exploitation candidate**: re-run cycle 10 backtest with only the conservative-regime seeds (44, 45, 46) → would the +1.4pp regime selection produce +1.4pp better OptRet? Out-of-sample test needed before declaring exploitable.
+- **#PY-263 Sharpe inflation caveat applies**: cycle 10 backtest reports Sharpe -19.55 ± uncertainty (per seed_43 single value); per #PY-263 this is 1.6-2.56x inflated from periods_per_day=1000 vs ~390 for 60s bins. Relative cross-seed comparison trustworthy; absolute Sharpe overstated.
+
+### Cross-references
+
+- 5 result.json files at `cycle10_r19_multi_seed__seed_{43..47}_*/result.json`
+- 5 equity_curve.npy artifacts via atomic_write_npy SSoT (FIND-090 closure)
+- Phase Y verdict JSON: `hft-ops/ledger/r19_multi_seed_verdicts/cycle10_r19_multi_seed_20260518T222513_verdict_20260519T113724.json`
+- Companion EXPERIMENT_INDEX entry: `lob-model-trainer/EXPERIMENT_INDEX.md` "Cycle 10 (#PY-243): R-19 Multi-Seed Validation" section
+- Sweep launch BG task: `bkl9m5k18` (Bash) completed exit 0 at 13:32 CEST 2026-05-19
+- Closes: #PY-307 + #PY-308 BUG2-A; Files: #PY-316
+- Prior R-19 cycle bridge: Round 19a (same architecture; PRE-BUG2A + PRE-FIND-NEW-01; single seed=42)

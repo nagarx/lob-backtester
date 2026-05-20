@@ -620,6 +620,12 @@ class VectorizedEngine:
         # Build typed context (backward compatible with dict access)
         from lobbacktest.context import BacktestContext
 
+        # #PY-263 (2026-05-21): config.periods_per_day is now Optional[float] = None
+        # (was float = 1000.0). Read resolved_periods_per_day to get the
+        # mode-aware-dispatched value: explicit override OR derived from
+        # zero_dte.bin_seconds OR legacy 1000.0 fallback with DeprecationWarning.
+        # Closes silent Sharpe inflation at sub-daily bins.
+        _resolved_ppd = self.config.resolved_periods_per_day
         context = BacktestContext(
             equity_curve=equity_curve,
             trade_pnls=trade_pnls,
@@ -627,30 +633,35 @@ class VectorizedEngine:
             labels=labels,
             initial_capital=self.config.initial_capital,
             trading_days_per_year=self.config.trading_days_per_year,
-            periods_per_day=self.config.periods_per_day,
+            # BacktestContext.periods_per_day field remains ``float = 1000.0`` for
+            # backward-compat with dict-protocol metric consumers (risk.py:118
+            # ``context.get("periods_per_day", self.periods_per_day)``); engine
+            # passes resolved value so consumers see correct annualization.
+            periods_per_day=_resolved_ppd,
             annualization_factor=self.config.annualization_factor,
         )
 
-        # Default metrics if none provided
+        # Default metrics if none provided — all annualizing metrics receive
+        # resolved_periods_per_day for correct sub-daily-bin Sharpe/Sortino/Calmar.
         if metrics is None:
             metrics = [
                 TotalReturn(),
                 AnnualReturn(
                     trading_days_per_year=self.config.trading_days_per_year,
-                    periods_per_day=self.config.periods_per_day,
+                    periods_per_day=_resolved_ppd,
                 ),
                 SharpeRatio(
                     trading_days_per_year=self.config.trading_days_per_year,
-                    periods_per_day=self.config.periods_per_day,
+                    periods_per_day=_resolved_ppd,
                 ),
                 SortinoRatio(
                     trading_days_per_year=self.config.trading_days_per_year,
-                    periods_per_day=self.config.periods_per_day,
+                    periods_per_day=_resolved_ppd,
                 ),
                 MaxDrawdown(),
                 CalmarRatio(
                     trading_days_per_year=self.config.trading_days_per_year,
-                    periods_per_day=self.config.periods_per_day,
+                    periods_per_day=_resolved_ppd,
                 ),
                 WinRate(),
                 ProfitFactor(),

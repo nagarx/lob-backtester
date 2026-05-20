@@ -583,7 +583,11 @@ class ExperimentRunner:
             allow_short=bt.get("allow_short", False),
             costs=CostConfig.for_exchange(exchange),
             trading_days_per_year=bt.get("trading_days_per_year", 252.0),
-            periods_per_day=bt.get("periods_per_day", 1000.0),
+            # #PY-263 (2026-05-21): default None (was 1000.0) enables mode-aware
+            # dispatch via ``BacktestConfig.resolved_periods_per_day``. Explicit
+            # YAML value preserves legacy override; absence triggers derivation
+            # from ``zero_dte.bin_seconds`` or DeprecationWarning fallback.
+            periods_per_day=bt.get("periods_per_day"),
         )
 
     def _build_zero_dte_config(self) -> ZeroDteConfig:

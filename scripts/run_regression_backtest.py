@@ -76,7 +76,11 @@ def run_one_backtest(
 
     engine = VectorizedEngine(config)
     tdy = config.trading_days_per_year
-    ppd = config.periods_per_day
+    # #PY-263 (2026-05-21): use resolved_periods_per_day (mode-aware dispatch
+    # via zero_dte.bin_seconds OR explicit override OR legacy 1000.0 with
+    # DeprecationWarning). Closes silent Sharpe/Sortino/Calmar inflation at
+    # sub-daily bins (sqrt(1000/390) = 1.6018x at 60s).
+    ppd = config.resolved_periods_per_day
     all_metrics = [
         SharpeRatio(trading_days_per_year=tdy, periods_per_day=ppd),
         SortinoRatio(trading_days_per_year=tdy, periods_per_day=ppd),

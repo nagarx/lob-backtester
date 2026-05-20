@@ -411,13 +411,22 @@ class BacktestConfig:
         stop_loss_pct: Optional stop-loss as percentage (e.g., 0.02 = 2%)
         take_profit_pct: Optional take-profit as percentage
         trading_days_per_year: For annualization (default: 252)
-        periods_per_day: Approximate trading periods per day (default: 1000)
+        periods_per_day: Trading periods per day (#PY-263 closure 2026-05-21:
+            ``Optional[float] = None``, was ``float = 1000.0``). When None,
+            ``resolved_periods_per_day`` derives the value from
+            ``zero_dte.bin_seconds`` (RTH 6.5 hr × 3600 s = 23400 s → 390 at 60s
+            bins) OR falls back to legacy 1000.0 with ``DeprecationWarning``
+            per hft-rules §8. Mutex with ``zero_dte.bin_seconds`` per §5
+            fail-fast (mirrors ``ZeroDteConfig`` L349-353 events_per_minute/
+            bin_seconds mutex). Closes silent Sharpe inflation at sub-daily
+            bins (sqrt(1000/390) = 1.6018x at 60s).
 
     Invariants:
         - initial_capital > 0
         - 0 < position_size <= max_position <= 1.0
         - trading_days_per_year > 0
-        - periods_per_day > 0
+        - periods_per_day > 0 (when set explicitly); resolved_periods_per_day always > 0
+        - NOT both (periods_per_day, zero_dte.bin_seconds) set simultaneously
     """
 
     initial_capital: float = 100_000.0
@@ -430,7 +439,13 @@ class BacktestConfig:
     stop_loss_pct: Optional[float] = None
     take_profit_pct: Optional[float] = None
     trading_days_per_year: float = 252.0
-    periods_per_day: float = 1000.0
+    # #PY-263 (2026-05-21): Optional[float] = None enables mode-aware dispatch
+    # via ``resolved_periods_per_day`` property. Legacy float = 1000.0 default
+    # caused silent ~1.6x Sharpe inflation at 60s bins per Sharpe scaling
+    # (sqrt(periods/yr)). All 5 engine sites + 4 scripts + experiment.py
+    # migrated to read ``resolved_periods_per_day``. Consumers reading the
+    # raw ``periods_per_day`` field directly will see None and must migrate.
+    periods_per_day: Optional[float] = None
     min_confidence: Optional[float] = None
     min_agreement: Optional[float] = None
 
@@ -485,8 +500,30 @@ class BacktestConfig:
             )
         if self.trading_days_per_year <= 0:
             raise ValueError(f"trading_days_per_year must be > 0, got {self.trading_days_per_year}")
-        if self.periods_per_day <= 0:
-            raise ValueError(f"periods_per_day must be > 0, got {self.periods_per_day}")
+        # #PY-263 (2026-05-21): periods_per_day is now Optional[float] = None.
+        # Validate only when explicitly set; derivation handled by
+        # ``resolved_periods_per_day`` property.
+        if self.periods_per_day is not None and self.periods_per_day <= 0:
+            raise ValueError(f"periods_per_day must be > 0 if set, got {self.periods_per_day}")
+        # #PY-263 mutex per hft-rules §5 fail-fast (mirrors ZeroDteConfig L349-353
+        # events_per_minute/bin_seconds mutex pattern). Explicit periods_per_day
+        # and zero_dte.bin_seconds are mutually exclusive — both specify the
+        # same physical quantity (periods per trading day) and would silently
+        # produce drift if both set.
+        if (
+            self.periods_per_day is not None
+            and self.zero_dte is not None
+            and self.zero_dte.bin_seconds is not None
+        ):
+            raise ValueError(
+                "BacktestConfig: periods_per_day and zero_dte.bin_seconds are "
+                "mutually exclusive (#PY-263 mutex). Specify ONE: either "
+                "explicit periods_per_day (legacy override) OR "
+                "zero_dte.bin_seconds (auto-derives periods_per_day = "
+                "23400/bin_seconds for RTH 6.5 hr × 3600 s). Got "
+                f"periods_per_day={self.periods_per_day}, "
+                f"zero_dte.bin_seconds={self.zero_dte.bin_seconds}."
+            )
         if self.stop_loss_pct is not None and self.stop_loss_pct <= 0:
             raise ValueError(f"stop_loss_pct must be > 0 if set, got {self.stop_loss_pct}")
         if self.take_profit_pct is not None and self.take_profit_pct <= 0:
@@ -495,16 +532,59 @@ class BacktestConfig:
             raise ValueError(f"fill_price must be 'close' or 'midpoint', got {self.fill_price}")
 
     @property
+    def resolved_periods_per_day(self) -> float:
+        """Resolve periods_per_day with mode-aware dispatch.
+
+        Phase Y / #PY-263 closure (2026-05-21): closes silent Sharpe inflation
+        at sub-daily bins (sqrt(1000/390) = 1.6018x at 60s bins; sqrt(1000/780)
+        ≈ 1.13x at 30s bins; etc.). Per hft-rules §8, fallback to legacy
+        ``1000.0`` emits ``DeprecationWarning`` so silent degradation is
+        machine-visible.
+
+        Resolution precedence:
+        1. **Explicit** ``periods_per_day`` (operator override; legacy YAML compat)
+        2. **Derive** from ``zero_dte.bin_seconds`` (RTH 6.5 hr × 3600 s = 23400 s)
+           e.g. 60s bins → 390, 30s → 780, 5s → 4680
+        3. **Legacy fallback** ``1000.0`` with ``DeprecationWarning`` per §8
+
+        Mutex (case 1 vs 2) enforced in ``__post_init__`` per §5 fail-fast.
+        """
+        if self.periods_per_day is not None:
+            return float(self.periods_per_day)
+        if self.zero_dte is not None and self.zero_dte.bin_seconds is not None:
+            # RTH = 6.5 hr × 3600 s = 23400 s; periods_per_day = RTH / bin_seconds
+            return 23400.0 / float(self.zero_dte.bin_seconds)
+        # Legacy default fallback — emit observability warning per §8
+        import warnings
+        warnings.warn(
+            "BacktestConfig.resolved_periods_per_day: neither explicit "
+            "periods_per_day nor zero_dte.bin_seconds set; falling back to "
+            "legacy default 1000.0 which inflates Sharpe by sqrt(1000/X) at "
+            "sub-daily bins (e.g. ~1.6x at 60s, ~1.13x at 30s, ~0.46x at 5s). "
+            "Set bin_seconds on zero_dte block for auto-derive, OR set "
+            "explicit periods_per_day on BacktestConfig, to silence and "
+            "produce correct annualization (#PY-263 closure 2026-05-21).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return 1000.0
+
+    @property
     def annualization_factor(self) -> float:
         """
         Factor to annualize per-period metrics.
 
         Returns:
-            sqrt(trading_days_per_year * periods_per_day)
+            sqrt(trading_days_per_year * resolved_periods_per_day)
+
+        #PY-263 (2026-05-21): uses ``resolved_periods_per_day`` to honor
+        mode-aware dispatch — reads explicit override OR derives from
+        ``zero_dte.bin_seconds`` OR falls back to legacy 1000.0 with
+        DeprecationWarning. Closes silent Sharpe inflation at sub-daily bins.
         """
         import numpy as np
 
-        return np.sqrt(self.trading_days_per_year * self.periods_per_day)
+        return np.sqrt(self.trading_days_per_year * self.resolved_periods_per_day)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert configuration to a serializable dictionary."""
@@ -624,7 +704,11 @@ class BacktestConfig:
             stop_loss_pct=d.get("stop_loss_pct"),
             take_profit_pct=d.get("take_profit_pct"),
             trading_days_per_year=d.get("trading_days_per_year", 252.0),
-            periods_per_day=d.get("periods_per_day", 1000.0),
+            # #PY-263 (2026-05-21): default None (was 1000.0) enables mode-aware
+            # dispatch via ``resolved_periods_per_day`` property. Explicit YAML
+            # value preserves legacy behavior; absence triggers derivation from
+            # ``zero_dte.bin_seconds`` or DeprecationWarning fallback per §8.
+            periods_per_day=d.get("periods_per_day"),
             min_confidence=d.get("min_confidence"),
             min_agreement=d.get("min_agreement"),
         )

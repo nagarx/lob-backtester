@@ -286,6 +286,158 @@ class TestBacktestConfigHf1ModeAwareIvDefault:
         assert config.zero_dte.opra_costs.implied_vol == 0.40
 
 
+class TestBacktestConfigPy263PeriodsPerDayResolution:
+    """#PY-263 closure (2026-05-21; Cycle A-rev): mode-aware ``periods_per_day``
+    dispatch via ``BacktestConfig.resolved_periods_per_day`` property.
+
+    Background: pre-fix ``periods_per_day: float = 1000.0`` default silently
+    inflated Sharpe by ``sqrt(1000/X)`` at sub-daily bins (1.6018x at 60s,
+    1.131x at 30s, 0.456x at 5s). Wave 1 Agent B (validation cycle 2026-05-21)
+    verified math; Wave 2 Agent G refuted Approach A (default 1000→245)
+    because it transplanted the bug to non-60s bins. Approach B (this fix)
+    uses Optional[float] = None + ``resolved_periods_per_day`` property +
+    mutex against ``zero_dte.bin_seconds`` (mirrors ZeroDteConfig L349-353
+    events_per_minute/bin_seconds mutex pattern).
+
+    Locks the invariant: SAME (trading_days_per_year, sampling_cadence) →
+    SAME annualization_factor across all consumer paths (engine + 4 scripts +
+    4 metric classes).
+    """
+
+    def test_default_periods_per_day_is_none(self):
+        """#PY-263: field default changed from 1000.0 → None per Optional[float] migration."""
+        config = BacktestConfig()
+        assert config.periods_per_day is None, (
+            "#PY-263 (2026-05-21): periods_per_day default must be None "
+            "(was 1000.0). None triggers mode-aware dispatch via "
+            "resolved_periods_per_day. Got: "
+            f"{config.periods_per_day!r}"
+        )
+
+    def test_resolved_falls_back_to_1000_with_deprecation_warning(self):
+        """#PY-263: legacy fallback emits DeprecationWarning per hft-rules §8.
+
+        When neither explicit periods_per_day nor zero_dte.bin_seconds set,
+        resolved_periods_per_day returns 1000.0 (legacy default) BUT emits
+        DeprecationWarning so silent degradation is machine-visible.
+        """
+        config = BacktestConfig()
+        with pytest.warns(DeprecationWarning, match=r"#PY-263"):
+            resolved = config.resolved_periods_per_day
+        assert resolved == 1000.0, (
+            f"#PY-263: legacy fallback should return 1000.0 (preserves "
+            f"pre-fix behavior for back-compat). Got: {resolved}"
+        )
+
+    def test_resolved_from_bin_seconds_60s(self):
+        """#PY-263: bin_seconds=60 → resolved=390.0 (RTH 23400/60).
+
+        Closes the silent inflation at 60s bins: sqrt(1000/390) = 1.6018x.
+        After fix, Sharpe at 60s bins is correctly annualized.
+        """
+        from lobbacktest.config import ZeroDteConfig
+        config = BacktestConfig(
+            zero_dte=ZeroDteConfig(enabled=True, bin_seconds=60.0)
+        )
+        assert config.resolved_periods_per_day == 390.0, (
+            f"#PY-263: bin_seconds=60 should derive 23400/60 = 390.0. "
+            f"Got: {config.resolved_periods_per_day}"
+        )
+
+    def test_resolved_from_bin_seconds_5s(self):
+        """#PY-263: bin_seconds=5 → resolved=4680.0 (RTH 23400/5).
+
+        Verifies the formula scales correctly across bin sizes (Wave 2G
+        flagged Approach A's default 245 as wrong for ~5s/30s bins).
+        """
+        from lobbacktest.config import ZeroDteConfig
+        config = BacktestConfig(
+            zero_dte=ZeroDteConfig(enabled=True, bin_seconds=5.0)
+        )
+        assert config.resolved_periods_per_day == 4680.0
+
+    def test_resolved_from_explicit_override(self):
+        """#PY-263: explicit periods_per_day=X wins (legacy override path)."""
+        config = BacktestConfig(periods_per_day=245.0)
+        assert config.resolved_periods_per_day == 245.0, (
+            "#PY-263: explicit operator override must take precedence over "
+            "mode-aware derivation."
+        )
+
+    def test_mutex_explicit_and_bin_seconds_raises(self):
+        """#PY-263 mutex per hft-rules §5 fail-fast (mirrors ZeroDteConfig
+        L349-353 events_per_minute/bin_seconds mutex pattern).
+
+        Both ``periods_per_day`` and ``zero_dte.bin_seconds`` specify the
+        same physical quantity. Setting both is ambiguous; fail-loud at
+        construction.
+        """
+        from lobbacktest.config import ZeroDteConfig
+        with pytest.raises(ValueError, match=r"mutually exclusive.*#PY-263"):
+            BacktestConfig(
+                periods_per_day=500.0,
+                zero_dte=ZeroDteConfig(enabled=True, bin_seconds=60.0),
+            )
+
+    def test_annualization_factor_uses_resolved(self):
+        """#PY-263: annualization_factor property routes through resolved_periods_per_day."""
+        from lobbacktest.config import ZeroDteConfig
+        import numpy as np
+        config = BacktestConfig(
+            zero_dte=ZeroDteConfig(enabled=True, bin_seconds=60.0),
+            trading_days_per_year=252.0,
+        )
+        expected = float(np.sqrt(252.0 * 390.0))
+        assert abs(config.annualization_factor - expected) < 1e-9, (
+            f"#PY-263: annualization_factor must use resolved_periods_per_day "
+            f"(=390 at 60s bins). Expected {expected}, got "
+            f"{config.annualization_factor}"
+        )
+
+    def test_explicit_negative_periods_per_day_raises(self):
+        """Validation: explicit periods_per_day must be > 0 when set."""
+        with pytest.raises(ValueError, match=r"periods_per_day must be > 0"):
+            BacktestConfig(periods_per_day=-1.0)
+
+    def test_none_does_not_trigger_validation(self):
+        """#PY-263: None is valid (triggers mode-aware dispatch); only > 0 enforced when set."""
+        # Should not raise — None is the new default
+        config = BacktestConfig(periods_per_day=None)
+        assert config.periods_per_day is None
+
+    def test_round_trip_to_dict_from_dict_with_none(self):
+        """#PY-263: to_dict emits None; from_dict reads None default — round-trip preserves Optional semantics."""
+        original = BacktestConfig()
+        d = original.to_dict()
+        assert d["periods_per_day"] is None
+        restored = BacktestConfig.from_dict(d)
+        assert restored.periods_per_day is None
+
+    def test_round_trip_to_dict_from_dict_with_explicit(self):
+        """#PY-263: explicit periods_per_day survives YAML round-trip."""
+        original = BacktestConfig(periods_per_day=390.0)
+        d = original.to_dict()
+        assert d["periods_per_day"] == 390.0
+        restored = BacktestConfig.from_dict(d)
+        assert restored.periods_per_day == 390.0
+        assert restored.resolved_periods_per_day == 390.0
+
+    def test_legacy_yaml_with_explicit_1000_preserved(self):
+        """#PY-263: 2 production YAMLs explicitly set `periods_per_day: 1000`
+        (nvda_readability_first_arcx.yaml + nvda_readability_first_xnas.yaml).
+        Approach B preserves operator-explicit value (no migration required;
+        no DeprecationWarning fires for explicit override).
+        """
+        import warnings
+        config = BacktestConfig.from_dict({"periods_per_day": 1000.0})
+        assert config.periods_per_day == 1000.0
+        # Explicit override does NOT trigger DeprecationWarning
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # any warning = test failure
+            resolved = config.resolved_periods_per_day
+        assert resolved == 1000.0
+
+
 class TestExchangePresetsSingleSource:
     """Phase 6 6A.6 regression guards — `_EXCHANGE_PRESETS` is the SINGLE
     SOURCE of exchange-calibrated cost data. Prior state duplicated the

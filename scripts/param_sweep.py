@@ -177,7 +177,14 @@ def run_single_backtest(
         ),
         allow_short=allow_short,
         trading_days_per_year=252,
-        periods_per_day=1000,
+        # #PY-263 (2026-05-21): omit explicit periods_per_day=1000 (was buggy
+        # legacy hardcode that inflated Sharpe ~1.6x at 60s bins). BacktestConfig
+        # default is now ``Optional[float] = None`` with mode-aware dispatch:
+        # absent value triggers ``resolved_periods_per_day`` derivation from
+        # ``zero_dte.bin_seconds`` OR DeprecationWarning fallback per §8. For
+        # param-sweep operators wanting deterministic annualization, set
+        # ``periods_per_day=<value>`` explicitly OR provide a ZeroDteConfig
+        # with bin_seconds.
     )
     
     strategy = ThresholdStrategy(

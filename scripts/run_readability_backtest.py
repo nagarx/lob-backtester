@@ -322,7 +322,10 @@ def main():
     engine = VectorizedEngine(config)
 
     tdy = config.trading_days_per_year
-    ppd = config.periods_per_day
+    # #PY-263 (2026-05-21): use resolved_periods_per_day for mode-aware
+    # dispatch (closes silent Sharpe inflation at sub-daily bins). See
+    # BacktestConfig.resolved_periods_per_day docstring.
+    ppd = config.resolved_periods_per_day
     all_metrics = [
         SharpeRatio(trading_days_per_year=tdy, periods_per_day=ppd),
         SortinoRatio(trading_days_per_year=tdy, periods_per_day=ppd),

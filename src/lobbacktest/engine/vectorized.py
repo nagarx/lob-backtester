@@ -153,7 +153,7 @@ class BacktestData:
         # gate instead of file-existence.
         manifest = None
         if validate:
-            from lobbacktest.data.signal_manifest import SignalManifest
+            from hft_contracts.signal_manifest import SignalManifest
 
             manifest = SignalManifest.from_signal_dir(d)
             warnings = manifest.validate(d, expected_fields=expected_fields)

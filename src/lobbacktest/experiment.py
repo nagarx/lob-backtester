@@ -27,8 +27,8 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from hft_contracts.signal_manifest import SignalManifest
 from lobbacktest.config import BacktestConfig, CostConfig, OpraCalibratedCosts, ZeroDteConfig
-from lobbacktest.data.signal_manifest import SignalManifest
 from lobbacktest.engine.vectorized import BacktestData, VectorizedEngine
 from lobbacktest.engine.zero_dte import ZeroDtePnLTransformer
 from lobbacktest.registry import BacktestRegistry

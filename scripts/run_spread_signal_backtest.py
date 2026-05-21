@@ -48,6 +48,23 @@ from hft_evaluator.data.loader import ExportLoader
 # cycle) at run_regression_backtest.py + run_readability_backtest.py.
 from hft_contracts.atomic_io import atomic_write_binary
 
+# #PY-343 closure (2026-05-21, Option D.A cycle): consume canonical
+# SIGNAL_PRICE_FEATURE_INDEX + SIGNAL_SPREAD_FEATURE_INDEX SSoT instead of
+# hardcoded 40/42 literals. Per hft-rules §0 reuse-first (no hardcoded
+# indices; centralized constants module is the single source of truth).
+# Local aliases preserved to keep downstream consumer sites at L130/131/500
+# unchanged (zero downstream churn). Sister of FIND-110 (lob-backtester
+# np.load) + #PY-339 (lob-model-trainer SSoT bypass) closures. AST
+# regression-lock at tests/test_no_hardcoded_signal_indices_py343.py.
+# NOTE: dict-literal `RIDGE_FEATURES` at L88-95 still contains the integer
+# literals 40+42 inline (dict-value, not module-constant Assign) — out of
+# scope for this surgical close; documented as deferred sister
+# (#PY-343-EXT-DICT). Hoist to SSoT-keyed values in follow-up.
+from hft_contracts import (
+    SIGNAL_PRICE_FEATURE_INDEX,
+    SIGNAL_SPREAD_FEATURE_INDEX,
+)
+
 
 # =============================================================================
 # Constants
@@ -55,8 +72,8 @@ from hft_contracts.atomic_io import atomic_write_binary
 
 EXPORT_DIR = str(PROJECT_ROOT / "data" / "exports" / "e5_timebased_60s_point_return")
 OUTPUT_DIR = str(SCRIPT_DIR.parent / "outputs" / "backtests" / "spread_bps_signal")
-SPREAD_BPS_IDX = 42   # feature index for spread_bps
-MID_PRICE_IDX = 40     # feature index for mid_price
+SPREAD_BPS_IDX = SIGNAL_SPREAD_FEATURE_INDEX   # #PY-343: was hardcoded 42
+MID_PRICE_IDX = SIGNAL_PRICE_FEATURE_INDEX     # #PY-343: was hardcoded 40
 TARGET_HORIZON_IDX = 7  # H=60 point return
 
 HOLD_EVENTS = 60       # 60 bins = 60 minutes

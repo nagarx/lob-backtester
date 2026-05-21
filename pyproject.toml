@@ -29,9 +29,16 @@ dependencies = [
     # (equity_curve.npy persistence — protects against SIGKILL-mid-write
     # corruption that downstream analytics would silently consume).
     "hft-contracts>=2.7.0",
-    "numpy>=1.24.0",
     "matplotlib>=3.7.0",
+    "numpy>=1.24.0",
     "pyyaml>=6.0",
+    # T1-1 (2026-05-22, lob-backtester deep validation cycle): consumed by
+    # `lobbacktest.metrics.regression_prediction.{PredictionIC,PredictionCorrelation}`
+    # (Spearman / Pearson via scipy.stats) + `scripts/run_spread_signal_backtest.py`
+    # (norm via scipy.stats). Cross-repo consistency: hft-metrics +
+    # lob-model-trainer + hft-feature-evaluator all pin scipy>=1.10. Closes CI
+    # ModuleNotFoundError red streak since 2026-05-11 (18 consecutive runs).
+    "scipy>=1.10",
 ]
 
 [project.optional-dependencies]

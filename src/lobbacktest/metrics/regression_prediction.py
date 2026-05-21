@@ -10,7 +10,8 @@ actual returns — the fundamental measure of regression signal quality.
   - Constant-array NaN from corr computation returns 0.0 with
     RuntimeWarning (legitimate edge case — variance undefined)
   - scipy ImportError now raises (was silently 0.0; scipy is in
-    pyproject.toml [dev], absence indicates env-bug per hft-rules §5)
+    pyproject.toml [project.dependencies] as `scipy>=1.10` post T1-1
+    (2026-05-22), absence indicates env-bug per hft-rules §5)
 """
 
 import numpy as np
@@ -112,13 +113,13 @@ class PredictionIC(Metric):
         try:
             from scipy.stats import spearmanr
         except ImportError as exc:
-            # scipy is in pyproject.toml [dev]; missing = env-bug per §5.
-            # Was silently returning 0.0 — masked dependency-resolution
-            # failure as "model has no skill".
+            # scipy is in pyproject.toml [project.dependencies] post T1-1
+            # (2026-05-22); missing = env-bug per §5. Was silently returning
+            # 0.0 — masked dependency-resolution failure as "model has no skill".
             raise ImportError(
-                "PredictionIC requires scipy (declared in pyproject.toml). "
-                "Install with `pip install scipy>=1.10` or "
-                "`pip install -e '.[dev]'`."
+                "PredictionIC requires scipy (declared in pyproject.toml "
+                "[project.dependencies] as `scipy>=1.10`). "
+                "Reinstall via `pip install -e .` (scipy is now a runtime dep)."
             ) from exc
         corr, _ = spearmanr(self._predicted, self._actual)
         if not np.isfinite(corr):

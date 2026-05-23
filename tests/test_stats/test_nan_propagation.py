@@ -3,7 +3,16 @@ Wave 1F F5 + Wave 2-H H7 closure tests (2026-05-17).
 
 NaN aggregator propagation suite. Primitive metrics correctly return NaN
 on undefined inputs per Phase X.3 + FIND-024-EXT convention. This suite
-locks DOWNSTREAM behavior:
+locks DOWNSTREAM behavior.
+
+HF-2 closure note (2026-05-22): all 6 ``BacktestStats(result).compute()``
+sites in this file construct without explicit ``periods_per_day`` and
+intentionally use the legacy 1000.0 default — they exercise NaN-
+propagation semantics, not annualization correctness. The class-level
+``filterwarnings`` mark suppresses the HF-2 ``DeprecationWarning`` per
+test class so the NaN assertions remain the only failure surface. New
+``TestPeriodsPerDayHF2`` class in ``test_stats.py`` locks the warning
+behavior independently.
 
 1. `BacktestStats.compute()` → `BacktestStats.metrics()` preserves NaN
    from primitives (does not silently coerce to 0)
@@ -59,8 +68,17 @@ def _zero_trade_result() -> BacktestResult:
     )
 
 
+@pytest.mark.filterwarnings(
+    "ignore:BacktestStats.compute.*periods_per_day not specified:DeprecationWarning"
+)
 class TestNanPropagationThroughBacktestStats:
-    """Wave 1F F5: NaN from primitive metrics propagates through aggregator."""
+    """Wave 1F F5: NaN from primitive metrics propagates through aggregator.
+
+    HF-2 (2026-05-22): ``BacktestStats(...).compute()`` without explicit
+    ``periods_per_day`` now emits ``DeprecationWarning``; these tests use
+    legacy default 1000.0 intentionally to exercise NaN propagation, so
+    the warning is filtered at class level.
+    """
 
     def test_zero_trade_winrate_propagates_nan(self):
         """0-trade backtest → WinRate primitive returns NaN → metrics() dict has NaN."""
@@ -109,8 +127,14 @@ class TestNanPropagationThroughBacktestStats:
                 )
 
 
+@pytest.mark.filterwarnings(
+    "ignore:BacktestStats.compute.*periods_per_day not specified:DeprecationWarning"
+)
 class TestNanRenderingInSummary:
-    """Lock Wave 1F F5: summary() renders NaN visibly (not as 0.00%)."""
+    """Lock Wave 1F F5: summary() renders NaN visibly (not as 0.00%).
+
+    HF-2 filter: same rationale as ``TestNanPropagationThroughBacktestStats``.
+    """
 
     def test_summary_contains_metric_keys(self):
         """summary() output includes metric names (locks Expectancy presence)."""
@@ -151,8 +175,14 @@ class TestNanRenderingInSummary:
                         )
 
 
+@pytest.mark.filterwarnings(
+    "ignore:BacktestStats.compute.*periods_per_day not specified:DeprecationWarning"
+)
 class TestMetricOrderIndependence:
-    """Wave 2-H H7: context-independent metrics yield same result regardless of order."""
+    """Wave 2-H H7: context-independent metrics yield same result regardless of order.
+
+    HF-2 filter: same rationale as ``TestNanPropagationThroughBacktestStats``.
+    """
 
     def test_winrate_independent_of_metric_order(self):
         """WinRate doesn't depend on context from other metrics (no order sensitivity).
@@ -190,8 +220,14 @@ class TestMetricOrderIndependence:
             assert wr_a == wr_b, f"WinRate value differs by order: {wr_a} vs {wr_b}"
 
 
+@pytest.mark.filterwarnings(
+    "ignore:BacktestStats.compute.*periods_per_day not specified:DeprecationWarning"
+)
 class TestMetricsDictHasExpectedKeys:
-    """Wave 1C T2.2: lock current BacktestStats default metric set."""
+    """Wave 1C T2.2: lock current BacktestStats default metric set.
+
+    HF-2 filter: same rationale as ``TestNanPropagationThroughBacktestStats``.
+    """
 
     def test_default_metric_set_includes_core(self):
         """Default compute() emits at least the documented core metrics."""

@@ -6,7 +6,7 @@ operations for computing and displaying statistics.
 
 Example:
     >>> stats = (
-    ...     BacktestStats(result)
+    ...     BacktestStats(result, periods_per_day=390.0)
     ...         .with_book_size(100_000)
     ...         .compute()
     ... )
@@ -17,8 +17,25 @@ Note:
     ``.daily()`` / ``.monthly()`` raise ``NotImplementedError`` until
     ``BacktestResult`` exposes ``timestamps_ns``. See FIND-040 in
     ``VALIDATION_FINDINGS_2026_05_14.md``.
+
+HF-2 closure (2026-05-22, sister of #PY-263 BacktestConfig 2026-05-21):
+    ``BacktestStats`` accepts ``periods_per_day`` at construction (or via
+    ``.with_periods_per_day(...)``). When omitted, ``.compute()`` emits a
+    ``DeprecationWarning`` and the metric chain falls back to the legacy
+    1000.0 default (matching event-based 1000-events/sample sampling).
+    At time-based sub-daily bins (e.g., 60s = 390 periods/day), the
+    legacy default silently inflates Sharpe/Sortino/Calmar/AnnualReturn
+    by ~1.6018x (sqrt(1000/390)).
+
+    The engine path at ``vectorized.py:623-664`` already propagates
+    ``BacktestConfig.resolved_periods_per_day`` via the BacktestContext
+    dict; this closure extends the same discipline to the operator-facing
+    fluent ``BacktestStats`` API which builds its own context dict (the
+    fluent API does NOT go through the engine, so #PY-263's engine-level
+    closure does not transitively close this surface).
 """
 
+import warnings
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -84,15 +101,43 @@ class BacktestStats:
         ``BacktestResult`` exposes ``timestamps_ns``. See FIND-040.
     """
 
-    def __init__(self, result: BacktestResult):
+    def __init__(
+        self,
+        result: BacktestResult,
+        *,
+        periods_per_day: Optional[float] = None,
+    ):
         """
         Initialize BacktestStats.
 
         Args:
             result: BacktestResult from a backtest run
+            periods_per_day: Optional explicit periods_per_day for
+                annualization (Sharpe/Sortino/Calmar/AnnualReturn).
+                Sister-closure of #PY-263 BacktestConfig fix (2026-05-21).
+                When None (default), ``.compute()`` emits
+                ``DeprecationWarning`` and the metric chain falls back to
+                legacy default 1000.0 (matches event-based 1000-events/
+                sample sampling). At time-based sub-daily bins (e.g., 60s
+                = 390 periods/day) this default produces ~1.6018x
+                inflated Sharpe via sqrt(1000/390). Pass explicit value
+                (e.g., ``BacktestConfig.resolved_periods_per_day``) to
+                silence + compute correctly. Keyword-only per
+                ``SharpeRatio`` C1-positional-trap convention.
         """
+        # Q3 ASYMMETRY fix (2026-05-22): mid-impl gate flagged that `__init__`
+        # accepted `periods_per_day=0.0` silently while `with_periods_per_day`
+        # raised — inconsistent with §5 fail-fast. Validate at construction
+        # so silent zero-injection at risk.py:119 (`sqrt(252*0)=0` → Sharpe=0)
+        # is caught at the contract boundary.
+        if periods_per_day is not None and periods_per_day <= 0:
+            raise ValueError(
+                f"BacktestStats: periods_per_day must be > 0 if specified, "
+                f"got {periods_per_day}"
+            )
         self._result = result
         self._book_size: Optional[float] = None
+        self._periods_per_day: Optional[float] = periods_per_day
         self._period: str = "full"
         self._metrics: List[Metric] = []
         self._computed: Optional[StatsSummary] = None
@@ -108,6 +153,32 @@ class BacktestStats:
             self for chaining
         """
         self._book_size = book_size
+        return self
+
+    def with_periods_per_day(self, periods_per_day: float) -> "BacktestStats":
+        """
+        Set periods_per_day for annualization (sister of #PY-263 closure).
+
+        Args:
+            periods_per_day: Trading periods per day. For time-based bins
+                pass ``BacktestConfig.resolved_periods_per_day``
+                (mode-aware dispatch from #PY-263). For event-based
+                sampling pass 1000.0 explicitly to silence the legacy
+                default warning.
+
+        Returns:
+            self for chaining
+
+        Notes:
+            Idempotent: subsequent calls overwrite the prior value
+            (last-call-wins). Matches ``.with_book_size()`` semantics.
+        """
+        if periods_per_day <= 0:
+            raise ValueError(
+                f"BacktestStats.with_periods_per_day: periods_per_day "
+                f"must be > 0, got {periods_per_day}"
+            )
+        self._periods_per_day = periods_per_day
         return self
 
     def daily(self) -> "BacktestStats":
@@ -209,6 +280,39 @@ class BacktestStats:
 
         if self._book_size:
             context["book_size"] = self._book_size
+
+        # HF-2 (2026-05-22): sister-closure of #PY-263 BacktestConfig
+        # 2026-05-21. Inject periods_per_day into the context dict so
+        # that AnnualReturn (returns.py:171), SharpeRatio (risk.py:118),
+        # SortinoRatio (risk.py:227), and CalmarRatio (transitively via
+        # context["AnnualReturn"]) ALL read the explicit value instead
+        # of falling back to each metric's class default of 1000.0.
+        #
+        # Pre-fix this surface was the operator-facing fluent-API gap
+        # left open after #PY-263's engine-path closure: the engine at
+        # vectorized.py:623-664 propagates BacktestConfig.resolved_periods_per_day
+        # via BacktestContext, but BacktestStats.compute() builds its
+        # OWN context dict and constructed metrics with their 1000.0
+        # default — silently inflating annualized metrics ~1.6018x at
+        # 60s time-based bins (sqrt(1000/390)).
+        if self._periods_per_day is not None:
+            context["periods_per_day"] = self._periods_per_day
+        else:
+            warnings.warn(
+                "BacktestStats.compute(): periods_per_day not specified; "
+                "annualized metrics (SharpeRatio, SortinoRatio, CalmarRatio, "
+                "AnnualReturn) will fall back to legacy default 1000.0 "
+                "(event-based 1000-events/sample). At time-based sub-daily "
+                "bins (e.g., 60s = 390 periods/day), this silently inflates "
+                "Sharpe/Sortino/Calmar/AnnualReturn by ~1.6018x via "
+                "sqrt(1000/390). Pass explicit periods_per_day=<value> to "
+                "BacktestStats(...) or call .with_periods_per_day(<value>) "
+                "to silence + compute correctly. Sister-closure of #PY-263 "
+                "(2026-05-21 BacktestConfig mode-aware dispatch); see "
+                "BacktestConfig.resolved_periods_per_day.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         # Compute metrics
         computed = {}

@@ -530,6 +530,35 @@ class BacktestConfig:
             raise ValueError(f"take_profit_pct must be > 0 if set, got {self.take_profit_pct}")
         if self.fill_price not in ("close", "midpoint"):
             raise ValueError(f"fill_price must be 'close' or 'midpoint', got {self.fill_price}")
+        # FIND-058 PARTIAL CLOSURE (#PY-NEW, 2026-05-24): fill_price='midpoint' is
+        # DEAD CODE. The field is declared + validated + serialized, but the engine
+        # (`engine/vectorized.py` + `engine/zero_dte.py`) NEVER reads it (grep -rn
+        # "fill_price\|midpoint" on engine/ returns ZERO matches). Fills always use
+        # the time-series price (typically mid_price from feature index 40 of the
+        # signal export). 2 production YAMLs silently set `fill_price: midpoint`
+        # and get the default close-fill behavior with no operator notice.
+        # FIND-058 PARTIAL: REMOVE THIS WARN WHEN engine reads self.fill_price
+        # (see vectorized.py + zero_dte.py — Phase 8+ scope ~2-3 hr); until then,
+        # surface the silent lie per hft-rules §8 (never silently drop/clamp/fix).
+        # Sister-precedent: FIND-070 closure for min_agreement/min_confidence
+        # (L466-489 above). Use DeprecationWarning + stacklevel=2 + actionable
+        # migration guidance.
+        if self.fill_price == "midpoint":
+            warnings.warn(
+                "BacktestConfig.fill_price='midpoint' is DEAD CODE (FIND-058 "
+                "PARTIAL): this field is declared in the schema and validated, "
+                "but the engine (vectorized.py + zero_dte.py) NEVER reads it. "
+                "Fills always use the time-series price (typically mid_price "
+                "from feature index 40). Setting fill_price='midpoint' "
+                "silently provides NO benefit — your backtest runs as if "
+                "fill_price='close'. Either: (a) wire fill_price into engine "
+                "fill semantics (Phase 8+ scope ~2-3 hr), or (b) remove "
+                "'fill_price: midpoint' from your YAML (default 'close' is "
+                "operationally equivalent today). Scheduled for removal "
+                "2026-10-31 if not wired.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
     @property
     def resolved_periods_per_day(self) -> float:

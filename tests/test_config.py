@@ -116,14 +116,121 @@ class TestBacktestConfig:
             BacktestConfig(position_size=0.5, max_position=0.3)
 
     def test_validation_fill_price(self):
-        """Test that fill_price must be valid."""
-        # Valid values
-        BacktestConfig(fill_price="close")
-        BacktestConfig(fill_price="midpoint")
+        """Test that fill_price must be valid.
 
-        # Invalid value
+        Note: fill_price='midpoint' is valid-but-deprecated per FIND-058 PARTIAL
+        (DEAD CODE — engine never reads field). M1: wrap with pytest.warns to
+        silence stderr noise + lock the DeprecationWarning contract that the
+        FIND-058 PARTIAL closure adds (see __post_init__ at config.py:~533+).
+        Default 'close' must NOT trigger the warning.
+        """
+        # Valid value (default 'close' — no warning)
+        BacktestConfig(fill_price="close")
+
+        # Valid-but-deprecated value (FIND-058 PARTIAL: DEAD CODE warning fires)
+        with pytest.warns(DeprecationWarning, match="DEAD CODE"):
+            BacktestConfig(fill_price="midpoint")
+
+        # Invalid value (validator raises BEFORE the warning would fire)
         with pytest.raises(ValueError, match="fill_price must be"):
             BacktestConfig(fill_price="invalid")
+
+    def test_fill_price_midpoint_emits_deprecation_warning_FIND_058(self):
+        """FIND-058 PARTIAL: BacktestConfig(fill_price='midpoint') must emit
+        DeprecationWarning with actionable migration text.
+
+        Locks: (a) warning class = DeprecationWarning (sister-precedent with
+        FIND-070 closure at config.py:466-489), (b) message contains
+        'FIND-058 PARTIAL' grep token for cross-cycle discoverability,
+        (c) message cites '2026-10-31' removal calendar matching FIND-070
+        pattern, (d) message cites 'Phase 8+' wire-in alternative path.
+        """
+        with pytest.warns(DeprecationWarning) as warning_records:
+            BacktestConfig(fill_price="midpoint")
+
+        # Exactly one FIND-058 warning fired
+        find058_warnings = [
+            w for w in warning_records.list if "FIND-058" in str(w.message)
+        ]
+        assert len(find058_warnings) == 1, (
+            f"Expected exactly 1 FIND-058 warning, got {len(find058_warnings)}: "
+            f"{[str(w.message) for w in find058_warnings]}"
+        )
+
+        msg = str(find058_warnings[0].message)
+        assert "DEAD CODE" in msg
+        assert "FIND-058 PARTIAL" in msg
+        assert "2026-10-31" in msg, "FIND-070 sister-precedent removal calendar"
+        assert "Phase 8+" in msg, "wire-in alternative path documented"
+        assert "vectorized.py" in msg, "names the engine module that ignores field"
+
+    def test_fill_price_close_default_emits_no_warning_FIND_058(self):
+        """Default fill_price='close' must NOT emit FIND-058 DeprecationWarning.
+
+        Regression-lock: only the 'midpoint' value (silent-lie) triggers the
+        warning. Default 'close' (operationally-equivalent today) is silent.
+        """
+        import warnings as warnings_mod
+
+        with warnings_mod.catch_warnings(record=True) as caught:
+            warnings_mod.simplefilter("always")
+            BacktestConfig()  # Default fill_price='close'
+
+        find058_warnings = [
+            w for w in caught if "FIND-058" in str(w.message)
+        ]
+        assert len(find058_warnings) == 0, (
+            f"Default 'close' should NOT emit FIND-058 warning, got: "
+            f"{[str(w.message) for w in find058_warnings]}"
+        )
+
+    def test_fill_price_close_explicit_emits_no_warning_FIND_058(self):
+        """Explicit fill_price='close' (operator confirming default) must NOT
+        emit FIND-058 DeprecationWarning.
+
+        Rationale: 'close' is the operationally-correct value today; setting it
+        explicitly is operator-stating-intent, not deprecation.
+        """
+        import warnings as warnings_mod
+
+        with warnings_mod.catch_warnings(record=True) as caught:
+            warnings_mod.simplefilter("always")
+            BacktestConfig(fill_price="close")  # Explicit 'close'
+
+        find058_warnings = [
+            w for w in caught if "FIND-058" in str(w.message)
+        ]
+        assert len(find058_warnings) == 0
+
+    def test_fill_price_invalid_raises_before_warning_FIND_058(self):
+        """FIND-058 PARTIAL: invalid fill_price value must raise ValueError
+        BEFORE the DeprecationWarning fires.
+
+        Locks ordering invariant: validate first, then warn. Critical because
+        the validator at config.py:531-532 must reject typos before the new
+        deprecation block at config.py:533+ can read self.fill_price.
+        """
+        # ValueError must raise; no DeprecationWarning should be observable
+        with pytest.raises(ValueError, match="fill_price must be"):
+            BacktestConfig(fill_price="MIDPOINT")  # Wrong case = invalid
+
+        with pytest.raises(ValueError, match="fill_price must be"):
+            BacktestConfig(fill_price="midpoint_typo")
+
+    def test_fill_price_midpoint_yaml_roundtrip_emits_warning_FIND_058(self):
+        """FIND-058 PARTIAL: BacktestConfig.from_dict({'fill_price': 'midpoint'})
+        must emit DeprecationWarning (warning fires on YAML-load path, not just
+        direct construction).
+
+        Regression-lock: production YAMLs `nvda_readability_first_{xnas,arcx}.yaml`
+        set `fill_price: midpoint`. Loading them must surface the silent-lie
+        warning, not silently drop it via the from_dict construction path.
+        """
+        d = {"fill_price": "midpoint"}
+        with pytest.warns(DeprecationWarning, match="FIND-058 PARTIAL"):
+            config = BacktestConfig.from_dict(d)
+
+        assert config.fill_price == "midpoint"  # Value preserved (Option B)
 
     def test_validation_stop_loss(self):
         """Test that stop_loss must be positive if set."""

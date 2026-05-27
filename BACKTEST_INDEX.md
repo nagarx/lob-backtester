@@ -4,6 +4,68 @@
 
 ---
 
+## Per-Entry Template (Post-Cycle-14)
+
+<!-- Cycle 14 Option δ Phase 2 LITE — #PY-NEW-CONSUMPTION-ENFORCEMENT BACKTEST rollout 2026-05-27 -->
+
+**REQUIRED post-Cycle-14**: every NEW `## Round N` entry MUST include a `**Wiki consultation**` block citing relevant `theory:` / `synthesis:` / `FINDING-` IDs from `hft-wiki`. Grandfathered pre-Cycle-14 entries (Rounds 1-7 + all post-FIND-070/FIND-090/R-19/R-16a-e/R-17a/R-20 retrofits + Cluster D.1+E close-out entries) are EXEMPT (validator skips with INFO when date-extracted as pre-2026-05-27).
+
+Template format (markdown-section format compatible with existing Round-N structure):
+
+```markdown
+## Round N: <title> (verdict, YYYY-MM-DD)
+
+Cost model: <IBKR/OPRA anchor>
+Strategy: <strategy class>
+Signal source: <path>
+
+### Backtester invocation
+<command>
+
+### Wiki consultation (REQUIRED post-Cycle-14)
+- `theory:<slug>` — <≥20-char justification, e.g. "Huber δ=12.6 bps recalibrated for 60s bins kurtosis≈26.5 per AD-HUBER-4">
+- `synthesis:<slug>` — <≥20-char justification, e.g. "HMHP cascade AD-HMHP-1 LOAD-BEARING comparison against TLOB baseline at H10">
+- `FINDING-NNN-<slug>` — <known anti-pattern context>
+
+— OR explicit negative-result fallback:
+
+- **None applicable** — queried `hft-wiki list theory --tag=<X>` returned 0 matches against this backtest's substance scope `<X>`.
+
+### Per-threshold results
+<existing 8-threshold cost-aware sweep table format unchanged>
+
+### Verdict & Decision
+<existing block format unchanged>
+```
+
+**Discovery workflow** (run BEFORE designing the backtest):
+
+```bash
+cd /Users/knight/code_local/HFT-pipeline-v2/hft-wiki
+python3 scripts/cli.py list theory --tag=microstructure          # OFI / VPIN / spread
+python3 scripts/cli.py list theory --tag=regression_losses       # Huber / GMADL for threshold sweep
+python3 scripts/cli.py list theory --tag=off_exchange            # TRF / dark-pool signed-flow
+python3 scripts/cli.py list theory --tag=afml                    # de Prado triple-barrier + sample weights
+python3 scripts/cli.py list synthesis --tag=dl_architectures     # HMHP cascade (Cycle 14)
+python3 scripts/cli.py list synthesis --tag=operator_synthesis   # 5-path Framework
+python3 scripts/cli.py list finding --polarity=negative --status=validated,refuted
+```
+
+**Soft validator** (run BEFORE commit):
+
+```bash
+cd lob-backtester
+python3 scripts/check_backtest_index_completeness.py
+```
+
+WARN-not-ERROR (exit 0). Use `--strict` to escalate WARN → exit 1. Full discipline + worked examples in `CONTRIBUTING.md` + `../hft-wiki/playbooks/record-backtest-result.md`.
+
+**Why this exists**: Cycle 14 Phase 2 LITE rollout (#PY-NEW-CONSUMPTION-ENFORCEMENT HARD-ESCALATION TIER 1 response). Phase 1 (Cycle 11, EXPERIMENT_INDEX target) did NOT close per-surface Goodhart loop at Cycles 12 + 13 (both shipped 0% organic on BACKTEST_INDEX surface). Cycle 15 + Cycle 16 = H_Cycle14 measurement decisive cycles per pre-registered hypothesis in `../hft-wiki/ledgers/phases/PHASE-CYCLE-14-2026-05-27.md`; Cycle 17 = falsification trigger if both ship 0 organic citations meeting criteria (a)-(d).
+
+**EXPORT_INDEX excluded this cycle by DESIGN**: producer-side data lineage surface, NOT consumer-side R-NN authoring surface. Re-evaluate Cycle 16+ if surface evolves.
+
+---
+
 ## Round 3: IBKR-Validated + BSM Theta (2026-03-14)
 
 Cost model: IBKR 318-fill empirical commission ($0.70/contract) + BSM theta (replaces broken 10 bps/min constant). Theta was 22-78x overcalibrated in Round 2; this round has correct BSM-based theta.

@@ -1,6 +1,6 @@
 # LOB-Backtester: Codebase Technical Reference
 
-> **Version**: 0.1.0 | **Tests**: 612 (596 passed + 16 skipped) | **Last Updated**: 2026-05-29 (CI-green + hygiene bundle: lazy-import CI fix + HG-1 orphan-module delete + HG-6/#PY-309/#PY-334/FIND-058-EXT; cumulative through HF-2 2026-05-23 + Bundle A 2026-05-22)  
+> **Version**: 0.1.0 | **Tests**: 619 (603 passed + 16 skipped) | **Last Updated**: 2026-05-30 (validation cycle: V1 #PY-263 annualization wiring in `run_regression_backtest.py` [`--bin-seconds` threaded into the config so `resolved_periods_per_day`=390 at 60s, was the 1000.0 fallback inflating equity Sharpe/Sortino/Calmar ~1.6×] + V2 FIND-058-EXT `entry_window_*_et` dead-field warnings + value-locked engine-P&L/e2e golden tests; cumulative through CI-green + hygiene bundle 2026-05-29)  
 > **Purpose**: Complete technical details for LLMs and developers to understand, modify, and extend the codebase without prior context.
 
 ## State at HEAD (cumulative through Phase 7 Round 5)

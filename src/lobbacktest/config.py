@@ -407,6 +407,37 @@ class ZeroDteConfig:
                 DeprecationWarning,
                 stacklevel=2,
             )
+        # FIND-058-EXT (V2, 2026-05-30): entry_window_start_et / entry_window_end_et
+        # are ALSO DEAD CODE — declared + serialized (to_dict) + deserialized
+        # (from_dict) but NO engine/transformer consumer (grep "entry_window" on
+        # engine/ = ZERO; the 0DTE entry window is governed by
+        # opra_costs.entry_minutes_before_close). Same silent-no-op class as
+        # target_holding_minutes above; the original FIND-058-EXT sweep missed
+        # this pair. Warn ONLY on a non-default value ("14:00"/"15:30") so the
+        # production YAMLs that set the defaults stay silent. Removal 2026-10-31
+        # if not wired. (`warnings` is imported above in this method.)
+        if self.entry_window_start_et != "14:00":
+            warnings.warn(
+                "ZeroDteConfig.entry_window_start_et is DEAD CODE "
+                "(FIND-058-EXT): serialized + deserialized but the engine/"
+                "transformer NEVER reads it (the 0DTE entry window uses "
+                "opra_costs.entry_minutes_before_close). Setting a non-default "
+                "value silently provides NO effect. Remove it, or wire it into "
+                "ZeroDtePnLTransformer. Scheduled for removal 2026-10-31.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        if self.entry_window_end_et != "15:30":
+            warnings.warn(
+                "ZeroDteConfig.entry_window_end_et is DEAD CODE "
+                "(FIND-058-EXT): serialized + deserialized but the engine/"
+                "transformer NEVER reads it (the 0DTE entry window uses "
+                "opra_costs.entry_minutes_before_close). Setting a non-default "
+                "value silently provides NO effect. Remove it, or wire it into "
+                "ZeroDtePnLTransformer. Scheduled for removal 2026-10-31.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
     @property
     def resolved_events_per_minute(self) -> Optional[float]:

@@ -758,3 +758,50 @@ class TestZeroDteConfigFind058Ext:
         ]
         assert len(ext) == 0
 
+    # ---- V2 / FIND-058-EXT (2026-05-30): entry_window_*_et dead-field sweep ----
+    # The original FIND-058-EXT sweep (2026-05-29) missed entry_window_start_et /
+    # entry_window_end_et — declared + serialized + round-tripped but with ZERO
+    # engine/transformer consumers (the 0DTE entry window is governed by
+    # opra_costs.entry_minutes_before_close). Same silent-no-op §5 class.
+
+    def test_entry_window_start_nondefault_emits_deprecation(self):
+        from lobbacktest.config import ZeroDteConfig
+        with pytest.warns(DeprecationWarning, match="FIND-058-EXT") as recs:
+            ZeroDteConfig(entry_window_start_et="10:00")
+        msgs = [
+            str(w.message) for w in recs.list
+            if "entry_window_start_et" in str(w.message)
+        ]
+        assert len(msgs) == 1
+        assert "DEAD CODE" in msgs[0]
+        assert "2026-10-31" in msgs[0]
+
+    def test_entry_window_end_nondefault_emits_deprecation(self):
+        from lobbacktest.config import ZeroDteConfig
+        with pytest.warns(DeprecationWarning, match="FIND-058-EXT") as recs:
+            ZeroDteConfig(entry_window_end_et="16:00")
+        msgs = [
+            str(w.message) for w in recs.list
+            if "entry_window_end_et" in str(w.message)
+        ]
+        assert len(msgs) == 1
+        assert "DEAD CODE" in msgs[0]
+        assert "2026-10-31" in msgs[0]
+
+    def test_entry_window_defaults_emit_no_warning(self):
+        """Default entry_window ("14:00"/"15:30") must NOT warn so production
+        configs stay silent (the `!=` guard is load-bearing, like the
+        target_holding_minutes != 15.0 guard)."""
+        import warnings as wmod
+
+        from lobbacktest.config import ZeroDteConfig
+        with wmod.catch_warnings(record=True) as caught:
+            wmod.simplefilter("always")
+            ZeroDteConfig(entry_window_start_et="14:00", entry_window_end_et="15:30")
+            ZeroDteConfig()  # implicit defaults
+        ext = [
+            w for w in caught
+            if "entry_window" in str(w.message) and "FIND-058-EXT" in str(w.message)
+        ]
+        assert len(ext) == 0, f"default entry_window must not warn: {[str(w.message) for w in ext]}"
+

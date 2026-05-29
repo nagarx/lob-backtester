@@ -952,3 +952,45 @@ class TestPerTradePnlsDumpInProcess:
         # Summary should reflect 0 trades; option_trade_pnls_path absent
         assert summary.get("option_n_trades", 0) == 0
         assert "option_trade_pnls_path" not in summary
+
+
+# =============================================================================
+# V1 / #PY-263 — annualization wiring (regression-lock on the script config)
+# =============================================================================
+
+
+@pytest.mark.integration
+class TestPy263AnnualizationWiring:
+    """V1 / #PY-263 (2026-05-30): the regression script must thread --bin-seconds
+    into ``BacktestConfig.zero_dte`` so ``resolved_periods_per_day`` derives the
+    correct sub-daily annualization (390 at 60s) instead of the legacy 1000.0
+    fallback that silently inflated equity Sharpe/Sortino/Calmar ~1.6x
+    (sqrt(1000/390)). Regression-lock: if a future edit drops
+    ``bin_seconds=args.bin_seconds`` from the script's config build,
+    ``resolved_periods_per_day`` reverts to 1000.0 and the annualization line no
+    longer reads 390.0 — this test fails.
+    """
+
+    def test_bin_seconds_threads_into_periods_per_day_390(self, tmp_path: Path):
+        signal_dir = _construct_mock_signal_dir(tmp_path / "signals" / "test", n_samples=120)
+        result = subprocess.run(
+            [
+                sys.executable, str(REGRESSION_SCRIPT),
+                "--signals", str(signal_dir),
+                "--name", "py263_annualization",
+                "--exchange", "XNAS",
+                "--output-dir", str(tmp_path / "outputs"),
+                "--deep-itm",
+                "--bin-seconds", "60",
+                "--no-zero-dte",  # annualization print fires regardless of 0DTE compute
+            ],
+            capture_output=True, text=True, timeout=120,
+        )
+        assert result.returncode == 0, (
+            f"Script failed: stdout={result.stdout[-500:]} stderr={result.stderr[-500:]}"
+        )
+        assert "periods_per_day=390.0" in result.stdout, (
+            "#PY-263 V1: --bin-seconds 60 must thread into the config so "
+            "resolved_periods_per_day=390.0 (RTH 23400/60), NOT the legacy 1000.0 "
+            f"fallback. Annualization line missing/wrong; stdout: {result.stdout[-1500:]}"
+        )

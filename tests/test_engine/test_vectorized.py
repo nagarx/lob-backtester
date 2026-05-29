@@ -262,6 +262,89 @@ class TestVectorizedEngine:
         assert "MaxDrawdown" in result.metrics
 
 
+class TestEnginePnlValueLocked:
+    """V-NEW (2026-05-30): VALUE-locked golden P&L tests for VectorizedEngine.
+
+    Pre-existing engine tests assert only the SIGN of P&L (`total_pnl > 0`), so a
+    magnitude bug (mis-sizing, single-vs-double cost) would pass silently. These
+    lock the EXACT hand-derived P&L on deterministic scenarios chosen to avoid the
+    `allow_short` reversal (no SELL signal) and the position-size caps (modest 10%
+    position), so the engine's behavior is fully traceable and the expected value
+    is unambiguous.
+
+    `@filterwarnings("ignore")` tolerates the orthogonal, out-of-scope warnings
+    these minimal scenarios emit (the #PY-263 legacy-annualization
+    DeprecationWarning, since these configs set no bin_seconds, and an AnnualReturn
+    overflow RuntimeWarning on the tiny equity curve). The asserted quantities
+    (total_pnl / final_equity / trade_pnls) are annualization-independent, so
+    those warnings cannot affect them.
+    """
+
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
+    @pytest.mark.filterwarnings("ignore::RuntimeWarning")
+    def test_zero_cost_long_pnl_exact(self):
+        """BUY 100 sh @ $100 (10% of $100k), engine EOF-closes @ $110, zero cost.
+        gross = 100 * (110 - 100) = +$1000 exactly. No SELL → allow_short default
+        irrelevant; no sizing cap binds at a 10% position."""
+        prices = np.array([100.0, 110.0])
+        predictions = np.array([1, 0])  # BUY, HOLD -> engine fabricates EOF close
+        config = BacktestConfig(
+            initial_capital=100_000.0, position_size=0.1,
+            costs=CostConfig(spread_bps=0, slippage_bps=0, commission_per_trade=0),
+        )
+        result = VectorizedEngine(config).run(
+            BacktestData(prices=prices), DirectionStrategy(predictions, shifted=False)
+        )
+        assert result.total_pnl == pytest.approx(1000.0), (
+            f"100sh x $10 move, zero cost = $1000 exactly; got {result.total_pnl}"
+        )
+        assert result.final_equity == pytest.approx(101000.0)
+        assert len(result.trade_pnls) == 1
+        assert result.trade_pnls[0] == pytest.approx(1000.0)
+        assert result.total_trades == 2  # BUY + fabricated EOF FLAT
+
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
+    @pytest.mark.filterwarnings("ignore::RuntimeWarning")
+    def test_with_cost_long_pnl_exact(self):
+        """Same trade with spread 10 bps: entry cost = 10bps*$10k = $10,
+        exit cost = 10bps*$11k = $11 -> trade_pnl = 1000 - 10 - 11 = $979 exactly."""
+        prices = np.array([100.0, 110.0])
+        predictions = np.array([1, 0])
+        config = BacktestConfig(
+            initial_capital=100_000.0, position_size=0.1,
+            costs=CostConfig(spread_bps=10.0, slippage_bps=0.0),
+        )
+        result = VectorizedEngine(config).run(
+            BacktestData(prices=prices), DirectionStrategy(predictions, shifted=False)
+        )
+        assert len(result.trade_pnls) == 1
+        assert result.trade_pnls[0] == pytest.approx(979.0), (
+            f"gross 1000 - entry 10 - exit 11 = 979; got {result.trade_pnls[0]}"
+        )
+
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
+    @pytest.mark.filterwarnings("ignore::RuntimeWarning")
+    def test_multibar_e2e_value_locked(self):
+        """Synthetic end-to-end: BUY @ $100, ride down to $90 then up to $110,
+        engine EOF-closes @ $110. final_equity = $101000, TotalReturn = 0.01,
+        MaxDrawdown = (100000-99000)/100000 = 0.01 (the $90 dip), 2 trades."""
+        prices = np.array([100.0, 90.0, 110.0, 110.0])
+        predictions = np.array([1, 0, 0, 0])  # BUY then hold; engine EOF-closes
+        config = BacktestConfig(
+            initial_capital=100_000.0, position_size=0.1,
+            costs=CostConfig(spread_bps=0, slippage_bps=0, commission_per_trade=0),
+        )
+        result = VectorizedEngine(config).run(
+            BacktestData(prices=prices), DirectionStrategy(predictions, shifted=False)
+        )
+        assert result.final_equity == pytest.approx(101000.0)
+        assert result.metrics["TotalReturn"] == pytest.approx(0.01)
+        assert result.metrics["MaxDrawdown"] == pytest.approx(0.01)
+        assert result.total_trades == 2
+        assert len(result.trade_pnls) == 1
+        assert result.trade_pnls[0] == pytest.approx(1000.0)
+
+
 class TestTradePnlCosts:
     """P2 FIX: trade_pnls must include BOTH entry and exit costs."""
 
@@ -293,9 +376,12 @@ class TestTradePnlCosts:
         # Exit cost: 10 bps on 11000 notional = 11
         # trade_pnl ≈ 1000 - 10 - 11 = 979
         trade_pnl = result.trade_pnls[0]
-        assert trade_pnl < 1000, (
-            f"trade_pnl ({trade_pnl:.2f}) should be less than gross pnl (1000) "
-            f"because entry+exit costs should be deducted"
+        # V-NEW (2026-05-30): value-lock the magnitude (was only `< 1000`). The
+        # SELL at idx1 closes the long FIRST (this trade_pnls[0]); gross 1000 -
+        # entry cost 10 (10bps*$10k) - exit cost 11 (10bps*$11k) = 979.
+        assert trade_pnl == pytest.approx(979.0), (
+            f"trade_pnl ({trade_pnl:.2f}) should equal gross 1000 - entry 10 - "
+            f"exit 11 = 979 (entry+exit costs both deducted)"
         )
         assert trade_pnl > 0, f"Trade should still be profitable, got {trade_pnl:.2f}"
 

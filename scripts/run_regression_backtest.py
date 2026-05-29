@@ -422,11 +422,24 @@ def main():
             f"  Mode: ATM (delta={delta}, half_spread=${opra_costs.atm_call_half_spread}, "
             f"IV={atm_iv:.2f}, entry_min_to_close={atm_entry:.0f})"
         )
+    # V1 / #PY-263 (2026-05-30): thread the time-based sampling cadence into the
+    # config so ``BacktestConfig.resolved_periods_per_day`` derives the correct
+    # sub-daily annualization (23400 / bin_seconds = 390 at 60s) instead of the
+    # legacy 1000.0 fallback that silently inflates equity Sharpe/Sortino/Calmar
+    # ~1.6x at 60s bins (sqrt(1000/390)). ``args.bin_seconds`` is None on the
+    # --events-per-minute path (event-based bars/day != 390*events_per_minute, so
+    # that path stays on the documented fallback — set backtest.periods_per_day
+    # explicitly for event-based corpora). Mutex-safe: only bin_seconds is set on
+    # the config (NOT events_per_minute, which is passed to the transformer
+    # separately below), and periods_per_day stays None on BacktestConfig. The
+    # transformer takes events_per_minute explicitly and ignores config.bin_seconds,
+    # so this changes annualization ONLY — never the holding/theta math.
     zero_dte_config = ZeroDteConfig(
         enabled=args.zero_dte,
         delta=delta,
         opra_costs=opra_costs,
         contracts_per_trade=1,
+        bin_seconds=args.bin_seconds,
     )
     config = BacktestConfig(
         initial_capital=args.initial_capital,
@@ -434,6 +447,16 @@ def main():
         costs=costs,
         zero_dte=zero_dte_config,
     )
+    # V1 / #PY-263 (2026-05-30): surface the resolved annualization on the
+    # time-based path so operators (and the regression-lock test) can confirm the
+    # sub-daily fix is active (390 at 60s, not the legacy 1000.0 fallback). Uses
+    # the resolved_periods_per_day SSoT (no duplicated 23400/bin_seconds math).
+    if args.bin_seconds is not None:
+        print(
+            f"  Annualization: periods_per_day="
+            f"{config.resolved_periods_per_day:.1f} "
+            f"(mode-aware RTH 23400s / {args.bin_seconds}s bins; #PY-263)"
+        )
 
     holding_config = {"type": "horizon_aligned", "hold_events": args.hold_events}
     holding_policy = create_holding_policy(holding_config)

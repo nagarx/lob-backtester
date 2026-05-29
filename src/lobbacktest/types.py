@@ -295,7 +295,13 @@ class BacktestResult:
         drawdown = (peak - self.equity_curve) / peak
         # Handle division by zero when peak is 0
         drawdown = np.where(np.isfinite(drawdown), drawdown, 0.0)
-        return float(np.max(drawdown))
+        # #PY-309 (2026-05-29): clamp to [0, 1] to match the MaxDrawdown metric
+        # at risk.py:320 (max(0.0, min(1.0, max_dd))). Pre-fix this property
+        # could exceed 1.0 when cumulative loss > initial_capital drove equity
+        # negative (peak>0, equity<0 → dd>1.0) while the metric path clamped —
+        # the same backtest reported two different drawdowns via the two access
+        # paths. Per hft-rules §1 SSoT (single value for the same quantity).
+        return float(np.clip(np.max(drawdown), 0.0, 1.0))
 
     @property
     def n_winning_trades(self) -> int:

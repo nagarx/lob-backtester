@@ -17,6 +17,11 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional
 import yaml
 
+# #PY-334 (2026-05-29): atomic-write SSoT for save_yaml. hft_contracts.atomic_io
+# exposes no atomic_write_text, so save_yaml encodes YAML to bytes and routes
+# through atomic_write_binary (the in-repo FIND-090 registry.py precedent).
+from hft_contracts.atomic_io import atomic_write_binary
+
 
 # Phase 6 6A.6 (2026-04-17): module-level single-source exchange presets.
 # Previously duplicated as a dead `CostConfig.EXCHANGE_PRESETS` class-var AND
@@ -380,6 +385,28 @@ class ZeroDteConfig:
                 raise ValueError(
                     f"bin_seconds must be > 0, got {self.bin_seconds}"
                 )
+        # FIND-058-EXT (#PY-NEW, 2026-05-29): target_holding_minutes is DEAD
+        # CODE — serialized (to_dict) + deserialized (from_dict) but the engine
+        # (zero_dte.py) NEVER reads it (grep "target_holding" on engine/ = ZERO;
+        # only max_holding_minutes is consumed; the realized hold is derived
+        # from events / events_per_minute by ZeroDtePnLTransformer). Warn ONLY
+        # on a non-default value (!= 15.0) so the production YAMLs that set the
+        # default (nvda_readability_first_{xnas,arcx}.yaml: 15.0) stay silent.
+        # Same silent-lie class as fill_price='midpoint' (FIND-058 PARTIAL on
+        # BacktestConfig). Surface per hft-rules §8. Removal 2026-10-31.
+        import warnings
+        if self.target_holding_minutes != 15.0:
+            warnings.warn(
+                "ZeroDteConfig.target_holding_minutes is DEAD CODE "
+                "(FIND-058-EXT): serialized + deserialized but the engine "
+                "(zero_dte.py) NEVER reads it (only max_holding_minutes is "
+                "consumed; the hold is derived from events / "
+                "events_per_minute). Setting a non-default value silently "
+                "provides NO effect. Remove it, or wire it into "
+                "ZeroDtePnLTransformer. Scheduled for removal 2026-10-31.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
     @property
     def resolved_events_per_minute(self) -> Optional[float]:
@@ -528,6 +555,39 @@ class BacktestConfig:
             raise ValueError(f"stop_loss_pct must be > 0 if set, got {self.stop_loss_pct}")
         if self.take_profit_pct is not None and self.take_profit_pct <= 0:
             raise ValueError(f"take_profit_pct must be > 0 if set, got {self.take_profit_pct}")
+        # FIND-058-EXT (#PY-NEW, 2026-05-29): stop_loss_pct / take_profit_pct
+        # are DEAD CODE — declared + validated + serialized, but the engine
+        # (vectorized.py + zero_dte.py) NEVER reads them (grep on engine/ =
+        # ZERO; the only src/ reference is the _KNOWN_BACKTEST_KEYS allow-list
+        # in experiment.py, not a consumer) and no HoldingPolicy wires them.
+        # Same silent-lie class as fill_price='midpoint' (FIND-058 PARTIAL,
+        # below). Validate-then-warn ordering preserved: the `> 0` checks above
+        # run first (stop_loss_pct=0 still raises ValueError). Surface per
+        # hft-rules §8. Removal 2026-10-31 if not wired.
+        if self.stop_loss_pct is not None:
+            warnings.warn(
+                "BacktestConfig.stop_loss_pct is DEAD CODE (FIND-058-EXT): "
+                "declared + validated + serialized but the engine "
+                "(vectorized.py + zero_dte.py) NEVER reads it, and no "
+                "HoldingPolicy wires it. Setting it silently provides NO "
+                "effect. Use StopLossTakeProfitPolicy(stop_loss_bps=...) via "
+                "the holding-policy path instead, or remove it from your "
+                "config. Scheduled for removal 2026-10-31 if not wired.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        if self.take_profit_pct is not None:
+            warnings.warn(
+                "BacktestConfig.take_profit_pct is DEAD CODE (FIND-058-EXT): "
+                "declared + validated + serialized but the engine "
+                "(vectorized.py + zero_dte.py) NEVER reads it, and no "
+                "HoldingPolicy wires it. Setting it silently provides NO "
+                "effect. Use StopLossTakeProfitPolicy(take_profit_bps=...) via "
+                "the holding-policy path instead, or remove it from your "
+                "config. Scheduled for removal 2026-10-31 if not wired.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         if self.fill_price not in ("close", "midpoint"):
             raise ValueError(f"fill_price must be 'close' or 'midpoint', got {self.fill_price}")
         # FIND-058 PARTIAL CLOSURE (#PY-NEW, 2026-05-24): fill_price='midpoint' is
@@ -638,32 +698,37 @@ class BacktestConfig:
             "min_confidence": self.min_confidence,
             "min_agreement": self.min_agreement,
         }
-        if self.zero_dte.enabled:
-            result["zero_dte"] = {
-                "enabled": self.zero_dte.enabled,
-                "delta": self.zero_dte.delta,
-                "max_holding_minutes": self.zero_dte.max_holding_minutes,
-                "target_holding_minutes": self.zero_dte.target_holding_minutes,
-                "contracts_per_trade": self.zero_dte.contracts_per_trade,
-                "prefer_calls": self.zero_dte.prefer_calls,
-                "entry_window_start_et": self.zero_dte.entry_window_start_et,
-                "entry_window_end_et": self.zero_dte.entry_window_end_et,
-                "opra_costs": self.zero_dte.opra_costs.to_dict(),
-                # FIND-NEW-01 closure (2026-05-16): emit sampling-cadence
-                # fields so YAML round-trip preserves operator-set values.
-                # Only emit when non-None to keep YAML compact for legacy
-                # configs that pass events_per_minute at the transformer.
-                **(
-                    {"events_per_minute": self.zero_dte.events_per_minute}
-                    if self.zero_dte.events_per_minute is not None
-                    else {}
-                ),
-                **(
-                    {"bin_seconds": self.zero_dte.bin_seconds}
-                    if self.zero_dte.bin_seconds is not None
-                    else {}
-                ),
-            }
+        # HG-6 fix (2026-05-29): always serialize zero_dte (was gated on
+        # `if self.zero_dte.enabled:` → silent loss of populated fields when
+        # enabled=False, poisoning BacktestResult.config_dict provenance per
+        # hft-rules §7/§9). from_dict reconstructs losslessly with the keys
+        # present. The two **(...) conditional spreads stay keyed on None,
+        # independent of `enabled`.
+        result["zero_dte"] = {
+            "enabled": self.zero_dte.enabled,
+            "delta": self.zero_dte.delta,
+            "max_holding_minutes": self.zero_dte.max_holding_minutes,
+            "target_holding_minutes": self.zero_dte.target_holding_minutes,
+            "contracts_per_trade": self.zero_dte.contracts_per_trade,
+            "prefer_calls": self.zero_dte.prefer_calls,
+            "entry_window_start_et": self.zero_dte.entry_window_start_et,
+            "entry_window_end_et": self.zero_dte.entry_window_end_et,
+            "opra_costs": self.zero_dte.opra_costs.to_dict(),
+            # FIND-NEW-01 closure (2026-05-16): emit sampling-cadence
+            # fields so YAML round-trip preserves operator-set values.
+            # Only emit when non-None to keep YAML compact for legacy
+            # configs that pass events_per_minute at the transformer.
+            **(
+                {"events_per_minute": self.zero_dte.events_per_minute}
+                if self.zero_dte.events_per_minute is not None
+                else {}
+            ),
+            **(
+                {"bin_seconds": self.zero_dte.bin_seconds}
+                if self.zero_dte.bin_seconds is not None
+                else {}
+            ),
+        }
         return result
 
     @classmethod
@@ -750,6 +815,16 @@ class BacktestConfig:
         return cls.from_dict(d)
 
     def save_yaml(self, path: str) -> None:
-        """Save configuration to a YAML file."""
-        with open(path, "w") as f:
-            yaml.dump(self.to_dict(), f, default_flow_style=False)
+        """Save configuration to a YAML file.
+
+        #PY-334 (2026-05-29, atomic write): routes through the
+        ``hft_contracts.atomic_io`` SSoT via the in-repo FIND-090
+        ``registry.py:168-172`` pattern (yaml.dump → encode →
+        ``atomic_write_binary``). SIGKILL mid-write no longer corrupts the
+        target (tmp + fsync + ``os.replace``). Per hft-rules §0 reuse-first
+        (no inline tmp+rename) + §7 crash-safe. ``atomic_write_binary`` is
+        used because ``hft_contracts.atomic_io`` exposes no
+        ``atomic_write_text``.
+        """
+        yaml_bytes = yaml.dump(self.to_dict(), default_flow_style=False).encode("utf-8")
+        atomic_write_binary(path, lambda f: f.write(yaml_bytes))

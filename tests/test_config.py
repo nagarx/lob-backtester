@@ -240,8 +240,11 @@ class TestBacktestConfig:
         with pytest.raises(ValueError, match="stop_loss_pct must be > 0"):
             BacktestConfig(stop_loss_pct=-0.1)
 
-        # Valid positive value
-        config = BacktestConfig(stop_loss_pct=0.02)
+        # Valid positive value (FIND-058-EXT 2026-05-29: stop_loss_pct is DEAD
+        # CODE — a non-None value now emits a DeprecationWarning, mirroring the
+        # fill_price='midpoint' FIND-058 PARTIAL contract; wrap to lock it).
+        with pytest.warns(DeprecationWarning, match="FIND-058-EXT"):
+            config = BacktestConfig(stop_loss_pct=0.02)
         assert config.stop_loss_pct == 0.02
 
     def test_to_dict(self):
@@ -274,8 +277,16 @@ class TestBacktestConfig:
         assert config.costs.spread_bps == 2.0
         assert config.costs.slippage_bps == 1.0
 
+    @pytest.mark.filterwarnings(
+        "ignore:BacktestConfig.stop_loss_pct is DEAD CODE:DeprecationWarning"
+    )
     def test_round_trip_serialization(self):
-        """Test that to_dict -> from_dict preserves values."""
+        """Test that to_dict -> from_dict preserves values.
+
+        FIND-058-EXT 2026-05-29: this test sets stop_loss_pct=0.05 (now a
+        DEAD-CODE field that warns); the filterwarnings mark silences that
+        expected warning so the test stays focused on serialization fidelity.
+        """
         original = BacktestConfig(
             initial_capital=123456,
             position_size=0.25,
@@ -310,6 +321,94 @@ class TestBacktestConfig:
 
             assert loaded.initial_capital == 200000
             assert loaded.position_size == 0.3
+
+    def test_HG6_disabled_zero_dte_roundtrip_lossless(self):
+        """HG-6 (2026-05-29): zero_dte fields must survive to_dict→from_dict
+        even when enabled=False (pre-fix the block was gated on `enabled` and
+        silently reset to defaults: delta 0.95→0.5, contracts 3→1, max_holding
+        99→60), poisoning BacktestResult.config_dict provenance per hft-rules
+        §7/§9. Uses only LIVE (non-FIND-058-EXT) fields so the serialization
+        fix is isolated from the dead-field deprecation warning."""
+        from lobbacktest.config import ZeroDteConfig
+        original = BacktestConfig(
+            zero_dte=ZeroDteConfig(
+                enabled=False,
+                delta=0.95,
+                max_holding_minutes=99.0,
+                contracts_per_trade=3,
+            )
+        )
+        d = original.to_dict()
+        assert "zero_dte" in d, "HG-6: zero_dte must serialize even when disabled"
+        assert d["zero_dte"]["enabled"] is False
+        restored = BacktestConfig.from_dict(d)
+        assert restored.zero_dte.enabled is False
+        assert restored.zero_dte.delta == 0.95
+        assert restored.zero_dte.max_holding_minutes == 99.0
+        assert restored.zero_dte.contracts_per_trade == 3
+
+    def test_PY334_save_yaml_is_atomic_overwrite(self):
+        """#PY-334 (2026-05-29): save_yaml routes through the atomic_write_binary
+        SSoT (FIND-090 registry.py pattern) — not plain open()+yaml.dump.
+        Asserts the written file round-trips AND atomic overwrite of a
+        pre-existing file replaces it cleanly with no tmp sidecar left behind
+        (proves tmp + os.replace, SIGKILL-safe per hft-rules §7)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "config.yaml")
+            # Pre-seed a stale file to prove atomic overwrite replaces cleanly.
+            with open(path, "w") as f:
+                f.write("initial_capital: 1\n")
+            cfg = BacktestConfig(initial_capital=200000, position_size=0.3)
+            cfg.save_yaml(path)
+            loaded = BacktestConfig.load_yaml(path)
+            assert loaded.initial_capital == 200000
+            assert loaded.position_size == 0.3
+            # Atomic write renames tmp into place → only the target remains.
+            assert os.listdir(tmpdir) == ["config.yaml"], (
+                f"#PY-334: expected only config.yaml (no tmp sidecar), got "
+                f"{os.listdir(tmpdir)}"
+            )
+
+    def test_FIND058EXT_stop_loss_pct_emits_deprecation(self):
+        """FIND-058-EXT (2026-05-29): stop_loss_pct (DEAD CODE — no engine
+        read) emits DeprecationWarning with grep token + removal date, mirroring
+        the fill_price FIND-058 PARTIAL pattern (config.py:546-561)."""
+        with pytest.warns(DeprecationWarning, match="FIND-058-EXT") as recs:
+            BacktestConfig(stop_loss_pct=0.02)
+        msgs = [
+            str(w.message) for w in recs.list
+            if "stop_loss_pct" in str(w.message) and "FIND-058-EXT" in str(w.message)
+        ]
+        assert len(msgs) == 1
+        assert "DEAD CODE" in msgs[0]
+        assert "2026-10-31" in msgs[0]
+
+    def test_FIND058EXT_take_profit_pct_emits_deprecation(self):
+        """FIND-058-EXT: take_profit_pct (DEAD CODE) emits DeprecationWarning."""
+        with pytest.warns(DeprecationWarning, match="FIND-058-EXT") as recs:
+            BacktestConfig(take_profit_pct=0.03)
+        msgs = [
+            str(w.message) for w in recs.list
+            if "take_profit_pct" in str(w.message) and "FIND-058-EXT" in str(w.message)
+        ]
+        assert len(msgs) == 1
+        assert "DEAD CODE" in msgs[0]
+
+    def test_FIND058EXT_dead_fields_unset_emit_no_warning(self):
+        """Default (None) stop_loss/take_profit must NOT warn — only set
+        values trigger the FIND-058-EXT dead-code warning."""
+        import warnings as wmod
+        with wmod.catch_warnings(record=True) as caught:
+            wmod.simplefilter("always")
+            BacktestConfig()
+        ext = [w for w in caught if "FIND-058-EXT" in str(w.message)]
+        assert len(ext) == 0, f"default config should not warn FIND-058-EXT: {[str(w.message) for w in ext]}"
+
+    def test_FIND058EXT_stop_loss_invalid_raises_before_warning(self):
+        """Validate-then-warn ordering: stop_loss_pct<=0 raises ValueError
+        (config.py:527) BEFORE the FIND-058-EXT warning can fire."""
+        with pytest.raises(ValueError, match="stop_loss_pct must be > 0"):
+            BacktestConfig(stop_loss_pct=0)
 
 
 class TestBacktestConfigHf1ModeAwareIvDefault:
@@ -601,4 +700,61 @@ class TestExchangePresetsSingleSource:
         assert arcx.slippage_bps == 1.10   # ARCX VWES
         assert arcx.taker_fee_bps == 0.25
         assert arcx.maker_rebate_bps == -0.15
+
+
+class TestZeroDteConfigFind058Ext:
+    """FIND-058-EXT (2026-05-29): ZeroDteConfig.target_holding_minutes is DEAD
+    CODE (serialized + deserialized but never read by the zero_dte.py engine;
+    the realized hold is derived from events / events_per_minute). Warns ONLY
+    on a non-default value (!= 15.0) so the production YAMLs that set the
+    default (nvda_readability_first_{xnas,arcx}.yaml: target_holding_minutes:
+    15.0) stay silent — the `!= 15.0` guard is load-bearing.
+    """
+
+    def test_target_holding_nondefault_emits_deprecation(self):
+        from lobbacktest.config import ZeroDteConfig
+        with pytest.warns(DeprecationWarning, match="FIND-058-EXT") as recs:
+            ZeroDteConfig(target_holding_minutes=42.0)
+        msgs = [
+            str(w.message) for w in recs.list
+            if "target_holding_minutes" in str(w.message)
+        ]
+        assert len(msgs) == 1
+        assert "DEAD CODE" in msgs[0]
+        assert "2026-10-31" in msgs[0]
+
+    def test_target_holding_default_15_emits_no_warning(self):
+        """Production YAMLs set target_holding_minutes: 15.0 (the default) —
+        must NOT warn (regression-lock: nvda_readability_first_{xnas,arcx})."""
+        import warnings as wmod
+
+        from lobbacktest.config import ZeroDteConfig
+        with wmod.catch_warnings(record=True) as caught:
+            wmod.simplefilter("always")
+            ZeroDteConfig(target_holding_minutes=15.0)  # explicit default
+            ZeroDteConfig()  # implicit default
+        ext = [w for w in caught if "FIND-058-EXT" in str(w.message)]
+        assert len(ext) == 0, f"default target_holding must not warn: {[str(w.message) for w in ext]}"
+
+    def test_production_yaml_loads_without_target_holding_warning(self):
+        """End-to-end: loading the production YAML pattern (delta=0.50,
+        target_holding_minutes=15.0, bin_seconds=60) must not emit the
+        FIND-058-EXT target_holding warning."""
+        import warnings as wmod
+        d = {
+            "zero_dte": {
+                "enabled": True,
+                "delta": 0.50,
+                "target_holding_minutes": 15.0,
+                "bin_seconds": 60,
+            }
+        }
+        with wmod.catch_warnings(record=True) as caught:
+            wmod.simplefilter("always")
+            BacktestConfig.from_dict(d)
+        ext = [
+            w for w in caught
+            if "target_holding_minutes" in str(w.message) and "FIND-058-EXT" in str(w.message)
+        ]
+        assert len(ext) == 0
 

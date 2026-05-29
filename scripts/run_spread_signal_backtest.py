@@ -38,7 +38,16 @@ from lobbacktest.engine.vectorized import BacktestData, VectorizedEngine
 from lobbacktest.engine.zero_dte import ZeroDtePnLTransformer
 from lobbacktest.strategies.regression import RegressionStrategy, RegressionStrategyConfig
 from lobbacktest.strategies.holding import HorizonAlignedPolicy
-from hft_evaluator.data.loader import ExportLoader
+# CI-green fix (2026-05-29): `from hft_evaluator.data.loader import ExportLoader`
+# is lazy-imported inside main() (after argparse) so `--help` + the argparse
+# contract resolve WITHOUT the optional GitHub-only `hft-feature-evaluator`
+# sibling installed. CI checks out only lob-backtester + hft-contracts (no
+# CROSS_REPO_PAT for the private sibling repos), so a module-top-level import
+# broke the `--help` smoke tests (test_run_regression_backtest_manifest.py)
+# with ModuleNotFoundError. The loader is only needed at run-time (which needs
+# a local data/exports/ tree CI lacks anyway); the L33 sys.path.insert keeps
+# `hft_evaluator` resolvable for local monorepo execution (verified live path:
+# PROJECT_ROOT/hft-feature-evaluator/src exists).
 
 # FIND-NEW-04 closure (2026-05-16): atomic-write SSoT for results.json +
 # REPORT.md. Pre-fix non-atomic `open + json.dump` / `open + f.write` left
@@ -496,6 +505,15 @@ def main():
     if args.manifest:
         # Notice line so operator isn't silently confused about the no-op.
         log(f"Note: --manifest {args.manifest} accepted for orchestrator compatibility but unused (no ledger linkage from this script)")
+
+    # Lazy import (CI-green fix 2026-05-29): ExportLoader is only needed at
+    # run-time, after argparse. Keeping it out of module top-level lets `--help`
+    # exit (SystemExit at parse_args above) without requiring the optional
+    # `hft-feature-evaluator` sibling — CI has no CROSS_REPO_PAT for that
+    # private repo. Running this script for real still requires the sibling
+    # (resolved via the L33 sys.path.insert in a monorepo checkout, or via
+    # pip-install) + a local data/exports/ tree.
+    from hft_evaluator.data.loader import ExportLoader
 
     start = time.time()
     log("0DTE Backtester: spread_bps Signal (E13 Phase 8)")

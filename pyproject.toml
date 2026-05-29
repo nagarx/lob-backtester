@@ -32,12 +32,16 @@ dependencies = [
     "matplotlib>=3.7.0",
     "numpy>=1.24.0",
     "pyyaml>=6.0",
-    # T1-1 (2026-05-22, lob-backtester deep validation cycle): consumed by
-    # `lobbacktest.metrics.regression_prediction.{PredictionIC,PredictionCorrelation}`
-    # (Spearman / Pearson via scipy.stats) + `scripts/run_spread_signal_backtest.py`
-    # (norm via scipy.stats). Cross-repo consistency: hft-metrics +
-    # lob-model-trainer + hft-feature-evaluator all pin scipy>=1.10. Closes CI
-    # ModuleNotFoundError red streak since 2026-05-11 (18 consecutive runs).
+    # T1-1 (2026-05-22): scipy is consumed by
+    # `scripts/run_spread_signal_backtest.py:27` (`scipy.stats.norm` — BSM
+    # deep-ITM theta correction). HG-1 (2026-05-29): the former
+    # `lobbacktest.metrics.regression_prediction` consumer was DELETED as
+    # orphan dead code (0 consumers; IC/MSE/Correlation duplicated upstream in
+    # hft_metrics.ic / hft_metrics.regression per hft-rules §0 reuse-first), so
+    # only the run_spread_signal_backtest.py norm consumer now justifies the
+    # pin. Cross-repo consistency: hft-metrics + lob-model-trainer +
+    # hft-feature-evaluator all pin scipy>=1.10. Closes CI ModuleNotFoundError
+    # red streak since 2026-05-11 (18 consecutive runs).
     "scipy>=1.10",
 ]
 

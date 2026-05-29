@@ -16,7 +16,7 @@ This library backtests direction + regression prediction models on Limit Order B
 
 - **Per-Sample Engine** — position tracking with numpy-based metrics; fast for ~50K-sample backtests. (Module is named `engine/vectorized.py` for historical reasons — actual algorithm is a per-sample loop.)
 - **IBKR-Calibrated 0DTE Options** — real-fill cost model (316 NVDA fills): ATM Call half-spread $0.015, ATM Put $0.010, Deep ITM $0.005; commission $1.40 round-trip; BSM theta per-minute; breakevens 4.9 / 3.8 / 1.4 bps.
-- **Metric ABC Pattern** — composable metrics across 5 modules (`returns`, `risk`, `trading`, `prediction`, `regression_prediction`).
+- **Metric ABC Pattern** — composable metrics across 4 modules (`returns`, `risk`, `trading`, `prediction`).
 - **LabelMapping SSoT** — centralized label encoding (Phase 2a); strategies accept `label_mapping: Optional[LabelMapping]` and default to `SHIFTED_MAPPING`.
 - **HoldingPolicy composability** — 4 exit policies + `CompositePolicy` (mode='any'|'all').
 - **Phase 3b `ExperimentRunner`** — YAML-config orchestration (load → validate → run → register → aggregate).
@@ -204,8 +204,7 @@ lob-backtester/
 │   │   ├── returns.py           # TotalReturn, AnnualReturn
 │   │   ├── risk.py              # SharpeRatio, SortinoRatio, MaxDrawdown, CalmarRatio
 │   │   ├── trading.py           # WinRate, ProfitFactor, AverageWin, AverageLoss, PayoffRatio, Expectancy
-│   │   ├── prediction.py        # DirectionalAccuracy, SignalRate, UpPrecision, DownPrecision, ConfusionMetrics
-│   │   └── regression_prediction.py  # PredictionMSE, PredictionCorrelation, PredictionIC
+│   │   └── prediction.py        # DirectionalAccuracy, SignalRate, UpPrecision, DownPrecision, ConfusionMetrics
 │   │
 │   └── stats/
 │       └── stats.py             # BacktestStats fluent API

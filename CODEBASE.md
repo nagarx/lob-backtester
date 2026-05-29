@@ -1,6 +1,6 @@
 # LOB-Backtester: Codebase Technical Reference
 
-> **Version**: 0.1.0 | **Tests**: 597 (581 passed + 16 skipped) | **Last Updated**: 2026-05-23 (HF-2 BacktestStats Sharpe sister of #PY-263 closure; cumulative through Bundle A 2026-05-22 + Round-2 validation + HF-2)  
+> **Version**: 0.1.0 | **Tests**: 612 (596 passed + 16 skipped) | **Last Updated**: 2026-05-29 (CI-green + hygiene bundle: lazy-import CI fix + HG-1 orphan-module delete + HG-6/#PY-309/#PY-334/FIND-058-EXT; cumulative through HF-2 2026-05-23 + Bundle A 2026-05-22)  
 > **Purpose**: Complete technical details for LLMs and developers to understand, modify, and extend the codebase without prior context.
 
 ## State at HEAD (cumulative through Phase 7 Round 5)
@@ -22,7 +22,7 @@
 
 - **Engine**: Per-sample loop in `engine/vectorized.py` (name is historical; actual algorithm is NOT vectorized). `engine/zero_dte.py` layers IBKR-calibrated 0DTE options P&L transformation on top of the equity backtest.
 - **Strategy Pattern**: `Strategy` ABC in `strategies/base.py` + 7 concretes (direction, readability, regression, hybrid, holding policies, twap SKIP). `HoldingPolicy` ABC is composable via `CompositePolicy(mode="any"|"all")`.
-- **Metrics ABC**: `metrics/base.py::Metric` + 5 groupings across returns/risk/trading/prediction/regression_prediction.
+- **Metrics ABC**: `metrics/base.py::Metric` + 4 groupings across returns/risk/trading/prediction.
 - **Contract plane via hft_contracts**: `SignalManifest` canonical home at `hft_contracts.signal_manifest` (Phase 6 6B.5); `CONTENT_HASH_RE` regex imported from same SSoT (REV 2 public rename from `_CONTENT_HASH_RE`, 2026-04-20 — legacy name is a DeprecationWarning shim through 2026-10-31); `ContractError` imported from `hft_contracts.validation` (REV 2 F1 consolidation — was two independent classes); `atomic_write_json` imported from `hft_contracts.atomic_io` (REV 2 public rename from `_atomic_io`); label encoding defers to `hft_contracts.labels.LabelContract` for cross-module agreement.
 - **IBKR-calibrated 0DTE cost model**: constants calibrated from 316 real NVDA option fills; breakevens 4.9 / 3.8 / 1.4 bps for ATM Call / ATM Put / Deep ITM. Provenance in `engine/zero_dte.py` docstring + `IBKR-transactions-trades/COST_AUDIT_2026_03.md`.
 - **Typed + dict hybrid context**: `BacktestContext` is a typed dataclass that also implements `__getitem__` / `__contains__` / `get` / `update` for backward compat with metric consumers written for dict-protocol. Migration path to pure typed access is gradual.
@@ -108,8 +108,7 @@ src/lobbacktest/
 │   ├── returns.py       # TotalReturn, AnnualReturn
 │   ├── risk.py          # SharpeRatio, SortinoRatio, MaxDrawdown, CalmarRatio
 │   ├── trading.py       # WinRate, ProfitFactor, Expectancy, etc.
-│   ├── prediction.py    # DirectionalAccuracy, SignalRate, UpPrecision, DownPrecision
-│   └── regression_prediction.py  # PredictionMSE, PredictionCorrelation, PredictionIC
+│   └── prediction.py    # DirectionalAccuracy, SignalRate, UpPrecision, DownPrecision
 │
 ├── stats/               # Statistics and aggregation
 │   ├── __init__.py

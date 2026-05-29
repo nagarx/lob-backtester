@@ -309,6 +309,42 @@ class TestBacktestResult:
         expected_dd = (115 - 100) / 115
         assert abs(result.max_drawdown - expected_dd) < 0.001
 
+    def test_PY309_max_drawdown_clamped_to_one_parity_with_metric(self):
+        """#PY-309 (2026-05-29): BacktestResult.max_drawdown property must clamp
+        to [0,1], matching the MaxDrawdown metric at risk.py:320. Pre-fix the
+        property returned >1.0 (raw 1.3 here) when cumulative loss drove equity
+        negative (peak>0, equity<0) while the metric clamped — the same backtest
+        reported two different drawdowns via the two access paths (dual-path
+        drift, hft-rules §1 SSoT)."""
+        from lobbacktest.metrics.risk import MaxDrawdown
+
+        equity = np.array([100.0, 50.0, -30.0, 10.0])  # peak>0, eq<0 → raw dd=1.3
+        returns = np.diff(equity) / equity[:-1]
+        result = BacktestResult(
+            equity_curve=equity,
+            returns=returns,
+            positions=np.zeros(4),
+            trades=[],
+            trade_pnls=np.array([]),
+            prices=np.ones(4) * 100.0,
+            predictions=np.zeros(4),
+            labels=None,
+            metrics={},
+            config_dict={},
+            initial_capital=100.0,
+            final_equity=10.0,
+            total_trades=0,
+            start_index=0,
+            end_index=3,
+        )
+        prop_dd = result.max_drawdown
+        assert prop_dd == 1.0, f"#PY-309: property must clamp to 1.0, got {prop_dd}"
+        # Dual-path parity: the metric on the same equity curve must agree.
+        metric_dd = MaxDrawdown().compute(returns, {"equity_curve": equity})["MaxDrawdown"]
+        assert abs(prop_dd - metric_dd) < 1e-12, (
+            f"#PY-309 dual-path parity: property {prop_dd} != metric {metric_dd}"
+        )
+
     def test_validation_length_mismatch_prices(self):
         """Test that mismatched prices length raises error."""
         with pytest.raises(ValueError, match="prices length"):

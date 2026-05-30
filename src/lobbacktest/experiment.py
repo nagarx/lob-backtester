@@ -4,6 +4,16 @@ Replaces manual script chaining (load → build → run → save) with a
 single YAML-driven runner that validates inputs, executes backtests
 (including parameter sweeps), and registers results automatically.
 
+STATUS (2026-05-30): NOT on the hft-ops orchestrator path. The production
+pipeline's ``backtesting`` stage shells out to the standalone scripts under
+``scripts/`` (``run_regression_backtest.py`` / ``run_readability_backtest.py`` /
+``run_spread_signal_backtest.py``) via subprocess — see
+``hft-ops/src/hft_ops/stages/backtesting.py``. ``ExperimentRunner`` is
+exercised by this repo's own test suite; treat the scripts as the production
+entry points. (Documented to avoid the hft-rules §11 drift hazard of two
+divergent run paths — both now close #PY-263 annualization, but the scripts
+are what hft-ops actually invokes.)
+
 Usage:
     runner = ExperimentRunner.from_yaml("configs/experiment.yaml")
     result = runner.run()
@@ -577,11 +587,28 @@ class ExperimentRunner:
             _warn_unknown_yaml_keys("backtest", bt, _KNOWN_BACKTEST_KEYS)
         exchange = bt.get("exchange", "XNAS")
 
+        # #PY-263 (2026-05-30): thread the cadence-bearing zero_dte (built by
+        # _build_zero_dte_config from the YAML's zero_dte.bin_seconds) into the
+        # metrics BacktestConfig so resolved_periods_per_day derives
+        # 23400/bin_seconds (390 at 60s) instead of the legacy 1000.0 fallback —
+        # closing the same #PY-263 silent-Sharpe-inflation class V1 closed for
+        # run_regression_backtest.py, here on the ExperimentRunner path. The
+        # engine reads config.zero_dte ONLY via resolved_periods_per_day /
+        # annualization_factor / to_dict (verified: vectorized.py never branches
+        # the equity result on zero_dte.enabled — the 0DTE transform is post-hoc
+        # via a SEPARATE ZeroDtePnLTransformer), so this is annualization-only;
+        # the holding/theta/cost P&L is unchanged. Mutex (config.py:571-584): a
+        # YAML setting BOTH backtest.periods_per_day AND zero_dte.bin_seconds
+        # fail-louds (correct per hft-rules §5; no current config/test sets both).
+        # NOTE: this now calls _build_zero_dte_config() unconditionally, so a
+        # config with an *ambiguous* zero_dte block (top-level AND nested) now
+        # fail-louds here rather than being silently ignored — more correct per §5.
         return BacktestConfig(
             initial_capital=bt.get("initial_capital", 100_000.0),
             position_size=bt.get("position_size", 0.1),
             allow_short=bt.get("allow_short", False),
             costs=CostConfig.for_exchange(exchange),
+            zero_dte=self._build_zero_dte_config(),
             trading_days_per_year=bt.get("trading_days_per_year", 252.0),
             # #PY-263 (2026-05-21): default None (was 1000.0) enables mode-aware
             # dispatch via ``BacktestConfig.resolved_periods_per_day``. Explicit

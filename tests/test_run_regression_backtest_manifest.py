@@ -994,3 +994,42 @@ class TestPy263AnnualizationWiring:
             "resolved_periods_per_day=390.0 (RTH 23400/60), NOT the legacy 1000.0 "
             f"fallback. Annualization line missing/wrong; stdout: {result.stdout[-1500:]}"
         )
+
+
+class TestPy263AnnualizationPersisted:
+    """G1a / #PY-263 (2026-05-30): the resolved annualization comparability key
+    (``resolved_periods_per_day`` + ``annualization_factor``) must be PERSISTED
+    into the per-script ``<name>.json`` summary so a saved run self-describes
+    which annualization scaled its Sharpe/Sortino/Calmar (390 at 60s vs the 1000
+    fallback) — making runs comparable/auditable from the record alone (not just
+    the stdout print, which hft-ops truncates).
+    """
+
+    def test_resolved_annualization_persisted_in_summary_json(self, tmp_path: Path):
+        signal_dir = _construct_mock_signal_dir(tmp_path / "signals" / "test", n_samples=120)
+        out_dir = tmp_path / "outputs"
+        result = subprocess.run(
+            [
+                sys.executable, str(REGRESSION_SCRIPT),
+                "--signals", str(signal_dir),
+                "--name", "py263_persisted",
+                "--exchange", "XNAS",
+                "--output-dir", str(out_dir),
+                "--deep-itm",
+                "--bin-seconds", "60",
+                "--no-zero-dte",
+            ],
+            capture_output=True, text=True, timeout=120,
+        )
+        assert result.returncode == 0, (
+            f"Script failed: stdout={result.stdout[-500:]} stderr={result.stderr[-500:]}"
+        )
+        summary = json.loads((out_dir / "py263_persisted.json").read_text())
+        assert summary.get("resolved_periods_per_day") == 390.0, (
+            "G1a/#PY-263: <name>.json must persist resolved_periods_per_day=390.0 "
+            f"(RTH 23400/60). Got: {summary.get('resolved_periods_per_day')}"
+        )
+        assert summary.get("annualization_factor") == pytest.approx((252.0 * 390.0) ** 0.5), (
+            "G1a/#PY-263: <name>.json must persist annualization_factor = "
+            "sqrt(252 * resolved_periods_per_day)."
+        )

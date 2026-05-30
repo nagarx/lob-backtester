@@ -56,6 +56,42 @@ def _construct_mock_signal_dir(target_dir: Path, n_samples: int = 100) -> Path:
     return target_dir
 
 
+class TestPy263ReadabilityAnnualization:
+    """R1 / #PY-263 (2026-05-30): the readability script must thread
+    --bin-seconds into ``BacktestConfig.zero_dte`` so ``resolved_periods_per_day``
+    derives 390 at 60s, not the legacy 1000.0 fallback (sqrt(1000/390)=1.6x
+    equity-Sharpe inflation). Sister-lock to
+    ``test_run_regression_backtest_manifest.py::TestPy263AnnualizationWiring``
+    (V1 closed the regression script; R1 closes this readability sister-script).
+    Regression-lock: dropping ``bin_seconds=args.bin_seconds`` from the script's
+    config build reverts the annualization line to 1000.0 → this test fails.
+    """
+
+    def test_bin_seconds_threads_into_periods_per_day_390(self, tmp_path: Path):
+        signal_dir = _construct_mock_signal_dir(tmp_path / "signals" / "test", n_samples=120)
+        result = subprocess.run(
+            [
+                sys.executable, str(READABILITY_SCRIPT),
+                "--signals", str(signal_dir),
+                "--name", "py263_readability_annualization",
+                "--exchange", "XNAS",
+                "--output-dir", str(tmp_path / "outputs"),
+                "--bin-seconds", "60",
+                "--no-zero-dte",  # annualization print fires regardless of 0DTE compute
+            ],
+            capture_output=True, text=True, timeout=120,
+        )
+        assert result.returncode == 0, (
+            f"Script failed: stdout={result.stdout[-500:]} stderr={result.stderr[-500:]}"
+        )
+        assert "periods_per_day=390.0" in result.stdout, (
+            "R1/#PY-263: --bin-seconds 60 must thread into the readability "
+            "script's BacktestConfig so resolved_periods_per_day=390.0 "
+            "(RTH 23400/60), NOT the legacy 1000.0 fallback. Annualization line "
+            f"missing/wrong; stdout: {result.stdout[-1500:]}"
+        )
+
+
 class TestPy305ModeAwareDefault:
     """#PY-305: sentinel-None resolution honors --delta for IV default."""
 

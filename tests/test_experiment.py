@@ -257,6 +257,57 @@ class TestZeroDteConfigBuildPY226:
         assert zd_config.contracts_per_trade == 1
 
 
+class TestPy263ExperimentRunnerAnnualization:
+    """G1b / #PY-263 (2026-05-30): ExperimentRunner._build_backtest_config must
+    thread the cadence-bearing zero_dte (from the YAML's ``zero_dte.bin_seconds``)
+    into the metrics ``BacktestConfig`` so ``resolved_periods_per_day`` derives
+    the correct sub-daily annualization (390 at 60s) instead of the legacy 1000.0
+    fallback — closing the #PY-263 silent-Sharpe-inflation class on the
+    ExperimentRunner path (sister to the regression/readability scripts). Before
+    G1b, ``_build_backtest_config`` omitted ``zero_dte=`` so this asserted 1000.0
+    (the bug). Gap-closure proof + regression-lock.
+    """
+
+    def test_bin_seconds_derives_390(self, tmp_path: Path):
+        """zero_dte.bin_seconds=60 (no explicit periods_per_day) → 390.0."""
+        signal_dir = _create_regression_signal_dir(tmp_path)
+        config = _make_regression_config(signal_dir, tmp_path)
+        config["zero_dte"] = {"bin_seconds": 60}
+        runner = ExperimentRunner(config)
+        bt_config = runner._build_backtest_config()
+        assert bt_config.resolved_periods_per_day == 390.0, (
+            "G1b/#PY-263: zero_dte.bin_seconds=60 must derive "
+            "resolved_periods_per_day = 23400/60 = 390.0 via the metrics "
+            "BacktestConfig, NOT the legacy 1000.0 fallback. Got "
+            f"{bt_config.resolved_periods_per_day}."
+        )
+        # annualization_factor = sqrt(trading_days_per_year * resolved_ppd)
+        assert bt_config.annualization_factor == pytest.approx((252.0 * 390.0) ** 0.5)
+
+    def test_events_per_minute_stays_on_1000_fallback(self, tmp_path: Path):
+        """Event-based path (events_per_minute, no bin_seconds): resolved_
+        periods_per_day only derives from bin_seconds, so event-based corpora
+        keep the documented 1000.0 fallback — G1b does NOT change this."""
+        signal_dir = _create_regression_signal_dir(tmp_path)
+        config = _make_regression_config(signal_dir, tmp_path)
+        config["zero_dte"] = {"events_per_minute": 10.0}
+        runner = ExperimentRunner(config)
+        bt_config = runner._build_backtest_config()
+        assert bt_config.resolved_periods_per_day == 1000.0
+
+    def test_explicit_periods_per_day_and_bin_seconds_raises(self, tmp_path: Path):
+        """Mutex (config.py): a config setting BOTH backtest.periods_per_day AND
+        zero_dte.bin_seconds fail-louds per hft-rules §5 (both specify the same
+        physical quantity). G1b now surfaces this at _build_backtest_config time."""
+        signal_dir = _create_regression_signal_dir(tmp_path)
+        config = _make_regression_config(signal_dir, tmp_path)
+        config["backtest"]["periods_per_day"] = 1000.0
+        config["zero_dte"] = {"bin_seconds": 60}
+        runner = ExperimentRunner(config)
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            runner._build_backtest_config()
+
+
 class TestHf1ModeAwareIvDefault:
     """HF-1 closure (2026-05-16 LATE; Bundle 1 hygiene post Option B Path B'):
     YAML-reader paths inherit mode-aware IV default mirroring

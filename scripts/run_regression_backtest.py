@@ -458,6 +458,15 @@ def main():
             f"(mode-aware RTH 23400s / {args.bin_seconds}s bins; #PY-263)"
         )
 
+    # G1a / #PY-263 (2026-05-30): capture the resolved annualization once for
+    # persistence into the per-script summary JSON + the hft-ops ledger record
+    # (below), so the saved artifacts self-describe WHICH annualization scaled the
+    # Sharpe/Sortino/Calmar — runs become comparable/auditable from the record
+    # alone (not just stdout, which hft-ops truncates). Reuses the
+    # resolved_periods_per_day SSoT (no duplicated 23400/bin_seconds math).
+    resolved_ppd = config.resolved_periods_per_day
+    annualization_factor = config.annualization_factor
+
     holding_config = {"type": "horizon_aligned", "hold_events": args.hold_events}
     holding_policy = create_holding_policy(holding_config)
 
@@ -558,6 +567,9 @@ def main():
             "signal_metadata": signal_metadata,
             "holding_policy": holding_policy.policy_name,
             "zero_dte_enabled": args.zero_dte,
+            # G1a / #PY-263 (2026-05-30): self-describing annualization key.
+            "resolved_periods_per_day": resolved_ppd,
+            "annualization_factor": annualization_factor,
             "results": all_results,
         },
         sort_keys=False,
@@ -635,6 +647,11 @@ def main():
                     "holding_policy": holding_policy.policy_name,
                     "exchange": args.exchange,
                     "zero_dte_enabled": args.zero_dte,
+                    # G1a / #PY-263 (2026-05-30): self-describing annualization key
+                    # so ledger queries (compare_experiments) can group/compare
+                    # runs by the annualization mode that scaled their Sharpe.
+                    "resolved_periods_per_day": float(resolved_ppd),
+                    "annualization_factor": float(annualization_factor),
                     "signal_dir": str(signal_dir),
                     "manifest": str(manifest_path),
                 }

@@ -285,11 +285,26 @@ def main():
         implied_vol=args.implied_vol,
         entry_minutes_before_close=args.entry_minutes_before_close,
     )
+    # R1 / #PY-263 (2026-05-30): thread the time-based sampling cadence into the
+    # config so ``BacktestConfig.resolved_periods_per_day`` derives the correct
+    # sub-daily annualization (23400 / bin_seconds = 390 at 60s) instead of the
+    # legacy 1000.0 fallback that silently inflates equity Sharpe/Sortino/Calmar
+    # ~1.6x at 60s bins. Mirrors the V1 fix in run_regression_backtest.py:437-459
+    # (V1 closed #PY-263 on the regression sister-script; this closes the
+    # readability sister-script V1 left — same silent-Sharpe-inflation class).
+    # ``args.bin_seconds`` is None on the --events-per-minute path (event-based
+    # corpora stay on the documented fallback; ~1000/day ≈ correct there).
+    # Mutex-safe: only bin_seconds is set on the config (NOT events_per_minute,
+    # which is passed to the transformer separately below at its construction);
+    # the transformer
+    # takes events_per_minute explicitly and ignores config.bin_seconds, so this
+    # changes annualization ONLY — never the holding/theta math.
     zero_dte_config = ZeroDteConfig(
         enabled=args.zero_dte,
         delta=args.delta,
         opra_costs=opra_costs,
         contracts_per_trade=args.contracts,
+        bin_seconds=args.bin_seconds,
     )
     config = BacktestConfig(
         initial_capital=args.initial_capital,
@@ -299,6 +314,16 @@ def main():
         min_agreement=args.min_agreement,
         min_confidence=args.min_confidence,
     )
+    # R1 / #PY-263 (2026-05-30): surface the resolved annualization on the
+    # time-based path so operators can confirm the sub-daily fix is active (390
+    # at 60s, not the legacy 1000.0 fallback). Uses the resolved_periods_per_day
+    # SSoT (no duplicated 23400/bin_seconds math).
+    if args.bin_seconds is not None:
+        print(
+            f"  Annualization: periods_per_day="
+            f"{config.resolved_periods_per_day:.1f} "
+            f"(mode-aware RTH 23400s / {args.bin_seconds}s bins; #PY-263)"
+        )
 
     readability_config = ReadabilityConfig(
         min_agreement=args.min_agreement,
@@ -418,6 +443,16 @@ def main():
         "min_confidence": args.min_confidence,
         "max_spread_bps": args.max_spread_bps,
         "cooldown_events": args.cooldown,
+    }
+    # G1a / #PY-263 (2026-05-30): persist the resolved annualization comparability
+    # key so the saved record self-describes WHICH annualization scaled the
+    # Sharpe/Sortino/Calmar (390 at 60s vs the 1000 fallback) — makes runs
+    # comparable/auditable from the artifact alone (not just stdout, which
+    # hft-ops truncates). Reuses the BacktestConfig properties (no duplicated math).
+    config_dict["annualization"] = {
+        "resolved_periods_per_day": config.resolved_periods_per_day,
+        "annualization_factor": config.annualization_factor,
+        "trading_days_per_year": config.trading_days_per_year,
     }
 
     run_id = registry.register(

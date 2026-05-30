@@ -575,3 +575,155 @@ class TestSamplingCadenceRegression:
         supply at transformer-construction time)."""
         cfg = ZeroDteConfig()
         assert cfg.resolved_events_per_minute is None
+
+
+# ---------------------------------------------------------------------------
+# Assembled 0DTE option-P&L golden lock (2026-05-30 post-compaction re-validation)
+# ---------------------------------------------------------------------------
+
+
+class TestZeroDteAssembledPnlGolden:
+    """Value-lock the ASSEMBLED 0DTE option P&L — the headline Deep-ITM money-math.
+
+    Gap closed (surfaced by the 2026-05-30 re-validation, `VALIDATION_FINDINGS_2026_05_30.md`
+    §9): prior to this class, the *components* of the 0DTE transform were golden-locked
+    (``theta_bsm_per_share`` by ``TestThetaBsmFormula``; ``round_trip_cost_per_contract``
+    by ``TestOpraCalibratedCosts``) but the **assembly** at ``zero_dte.py:405-434`` was NOT:
+    ``option_trade_pnls[i]``, the directional sign in ``underlying_moves_bps[i]``, the
+    ``is_call[i]`` BUY→call / SELL→put mapping, and the ``option_total_return`` /
+    ``option_final_equity`` aggregate had zero value assertions. A ``direction`` sign-flip
+    (``zero_dte.py:388``), an ``is_call`` ternary inversion (``:373``), a dropped/added cost
+    term, or ``gross`` using ``exit_price`` instead of ``entry_price`` (``:405``) would have
+    silently flipped the reported return and passed the entire suite.
+
+    Fixture: 2 round-trips, ``prefer_calls=True`` (production default; ``False`` raises per
+    ``config.py:337``), ``events_per_minute=1.0`` (TB v3p0 60s → 10-event hold = 10 min):
+      * leg 0 — BUY (call), 100.0 → 101.0 (+1% up move → +100 bps profit)
+      * leg 1 — SELL (put), 100.0 → 99.0 (-1% down move → +100 bps profit; shorts profit on a drop)
+
+    The asymmetric prices (exit != entry) are LOAD-BEARING: they make a "gross uses
+    exit_price instead of entry_price" mutation detectable. DO NOT flatten the round-trips
+    to exit == entry (pre-impl gate caveat 2026-05-30).
+
+    All expected values were independently re-derived AND verified bit-exact against the
+    real ``transform()`` output by the pre-impl adversarial gate (2026-05-30).
+    """
+
+    # BSM theta per contract for the fixture's 10-min hold @ S=$100, IV=0.40,
+    # 120 min to close: theta_bsm_per_share(100.0, 0.40, 120.0, 10.0) * 100.
+    # Gate-verified golden literal; the theta FORMULA itself is locked separately
+    # by TestThetaBsmFormula (this constant locks that transform() plumbs the
+    # right args — entry_price, IV, entry-minutes, holding — and scales by x100).
+    _EXPECTED_THETA_PER_CONTRACT = 2.3233619070671425
+
+    def _make_two_leg_result(self) -> BacktestResult:
+        """BUY/call (100→101) + SELL/put (100→99); asymmetric prices are load-bearing."""
+        trades = [
+            Trade(index=0, side=TradeSide.BUY, price=100.0, size=1, cost=0.0),
+            Trade(index=10, side=TradeSide.FLAT, price=101.0, size=1, cost=0.0),
+            Trade(index=20, side=TradeSide.SELL, price=100.0, size=1, cost=0.0),
+            Trade(index=30, side=TradeSide.FLAT, price=99.0, size=1, cost=0.0),
+        ]
+        n = 31
+        return BacktestResult(
+            equity_curve=np.array([100000.0] * n),
+            returns=np.zeros(n - 1),
+            positions=np.zeros(n),
+            prices=np.array([100.0] * n),
+            predictions=np.zeros(n),
+            labels=None,
+            trades=trades,
+            trade_pnls=np.array([0.0, 0.0]),  # values unused by transform; len=2 = n_round_trips
+            metrics={},
+            config_dict={},
+            initial_capital=100000.0,
+            final_equity=100000.0,
+            total_trades=4,
+            start_index=0,
+            end_index=n - 1,
+        )
+
+    def _make_transformer(self) -> ZeroDtePnLTransformer:
+        config = ZeroDteConfig(
+            enabled=True,
+            delta=0.50,
+            contracts_per_trade=1,
+            opra_costs=OpraCalibratedCosts(
+                atm_call_half_spread=0.015,
+                atm_put_half_spread=0.010,
+                commission_per_contract=0.70,
+                implied_vol=0.40,
+                entry_minutes_before_close=120.0,
+            ),
+            # max_holding_minutes=60 (default, no clip at 10 min);
+            # target_holding_minutes=15.0 + entry_window defaults → zero DeprecationWarning.
+        )
+        return ZeroDtePnLTransformer(config, events_per_minute=1.0)
+
+    def test_move_bps_sign_and_is_call_mapping_value_locked(self):
+        """Lock the directional sign (move_bps), the BUY→call / SELL→put mapping
+        (is_call), and the is_call→half_spread selection.
+
+        A ``direction`` sign-flip (zero_dte.py:388) flips both move_bps to -100;
+        an ``is_call`` ternary inversion (:373) swaps is_call AND the selected
+        half-spread (call $0.015 ↔ put $0.010). Both are the load-bearing 0DTE
+        semantics with no prior value-lock.
+        """
+        out = self._make_transformer().transform(self._make_two_leg_result())
+
+        # Leg 0 — BUY → call, +1% move → +100 bps profit; call half_spread 0.015.
+        assert bool(out.is_call[0]) is True, "BUY entry must map to a call (prefer_calls=True)"
+        assert out.underlying_moves_bps[0] == pytest.approx(100.0), (
+            "BUY 100→101 is a +100 bps move; a direction sign-flip would give -100"
+        )
+        assert out.spread_costs[0] == pytest.approx(3.0), "call spread = 2*0.015*100 = $3.00"
+
+        # Leg 1 — SELL → put, -1% price move → +100 bps profit; put half_spread 0.010.
+        assert bool(out.is_call[1]) is False, "SELL entry must map to a put (prefer_calls=True)"
+        assert out.underlying_moves_bps[1] == pytest.approx(100.0), (
+            "SELL 100→99 profits on the down move: -1*(99-100)/100*1e4 = +100 bps"
+        )
+        assert out.spread_costs[1] == pytest.approx(2.0), "put spread = 2*0.010*100 = $2.00"
+
+        assert out.is_call.dtype == bool
+
+    def test_assembled_option_trade_pnl_value_locked(self):
+        """Lock the per-trade assembly: option_pnl = gross - spread - comm - theta
+        (zero_dte.py:405-423).
+
+        gross = delta*(move_bps/1e4)*entry_price*100*contracts
+              = 0.50 * 0.01 * 100 * 100 * 1 = $50.00 for both legs (entry_price=100).
+        A dropped/added cost term, an assembly sign error, or gross using exit_price
+        instead of entry_price would all be caught here.
+        """
+        out = self._make_transformer().transform(self._make_two_leg_result())
+
+        assert out.commission_costs[0] == pytest.approx(1.40), "comm = 2*0.70*1 = $1.40"
+        assert out.commission_costs[1] == pytest.approx(1.40)
+        assert out.theta_costs[0] == pytest.approx(self._EXPECTED_THETA_PER_CONTRACT)
+        assert out.theta_costs[1] == pytest.approx(self._EXPECTED_THETA_PER_CONTRACT), (
+            "both legs share entry_price=100, IV=0.40, 120 min, 10-min hold → identical theta"
+        )
+
+        # gross $50.00 both legs; call leg pays $3.00 spread, put leg $2.00.
+        expected_pnl_0 = 50.0 - 3.0 - 1.40 - self._EXPECTED_THETA_PER_CONTRACT  # ≈ 43.2766
+        expected_pnl_1 = 50.0 - 2.0 - 1.40 - self._EXPECTED_THETA_PER_CONTRACT  # ≈ 44.2766
+        assert out.option_trade_pnls[0] == pytest.approx(expected_pnl_0)
+        assert out.option_trade_pnls[1] == pytest.approx(expected_pnl_1)
+
+    def test_option_equity_curve_and_total_return_value_locked(self):
+        """Lock the aggregate assembly: option_equity_curve = initial + cumsum([0, *pnls]),
+        option_final_equity, option_total_return (zero_dte.py:425-434)."""
+        out = self._make_transformer().transform(self._make_two_leg_result())
+
+        expected_pnl_0 = 50.0 - 3.0 - 1.40 - self._EXPECTED_THETA_PER_CONTRACT
+        expected_pnl_1 = 50.0 - 2.0 - 1.40 - self._EXPECTED_THETA_PER_CONTRACT
+        expected_final = 100000.0 + expected_pnl_0 + expected_pnl_1
+
+        assert out.option_equity_curve.shape == (3,), "n_round_trips + 1 = 3"
+        assert out.option_equity_curve[0] == pytest.approx(100000.0)
+        assert out.option_equity_curve[-1] == pytest.approx(expected_final)
+        assert out.option_final_equity == pytest.approx(expected_final)
+        assert out.option_total_return == pytest.approx(
+            (expected_pnl_0 + expected_pnl_1) / 100000.0
+        )

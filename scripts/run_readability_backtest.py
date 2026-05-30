@@ -487,6 +487,19 @@ def main():
                     "total_return": result.total_return,
                     "win_rate": result.metrics.get("WinRate", 0),
                     "max_drawdown": result.max_drawdown,
+                    # G1a / #PY-263 (2026-05-30 sister-symmetry fix): persist the
+                    # annualization comparability key into the hft-ops LEDGER record,
+                    # top-level to MATCH the regression sister-record
+                    # (run_regression_backtest.py:653-654). The original G1a (a646187)
+                    # wrote this only into the registry config_dict (nested), leaving
+                    # THIS ledger record — the cross-run query surface that
+                    # compare_experiments reads — without the key, so readability runs
+                    # silently mis-grouped vs regression runs in any annualization-keyed
+                    # ledger query. Reuses the BacktestConfig properties (no duplicated
+                    # 23400/bin_seconds math, hft-rules §0). float() per the regression
+                    # sister-record's numpy-scalar-safe convention.
+                    "resolved_periods_per_day": float(config.resolved_periods_per_day),
+                    "annualization_factor": float(config.annualization_factor),
                     "manifest": str(manifest_path),
                 }
                 record_path = ledger_path / f"{manifest_exp_name}_backtest_{args.name}.json"

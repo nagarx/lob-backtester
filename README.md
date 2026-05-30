@@ -4,7 +4,7 @@ Standalone backtesting library for evaluating LOB prediction models trained with
 
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 
-**Version**: 0.1.0 | **Tests**: 624 (608 passed + 16 skipped)
+**Version**: 0.1.0 | **Tests**: 625 (609 passed + 16 skipped)
 
 ---
 
@@ -210,7 +210,7 @@ lob-backtester/
 │       └── stats.py             # BacktestStats fluent API
 ├── scripts/                     # 6 runnable scripts (see Quick Start)
 ├── configs/                     # YAML experiment configs
-├── tests/                       # 624 tests (608 passed + 16 skipped)
+├── tests/                       # 625 tests (609 passed + 16 skipped)
 └── BACKTEST_INDEX.md            # Living backtest ledger
 ```
 
@@ -256,7 +256,7 @@ See `BACKTEST_INDEX.md` for the living backtest ledger.
 
 ```bash
 cd lob-backtester
-pytest tests/ -v     # expect 608 passed + 16 skipped (real-data gates)
+pytest tests/ -v     # expect 609 passed + 16 skipped (real-data gates)
 pytest tests/test_engine/test_vectorized.py -v   # engine-only
 pytest tests/test_signal_manifest.py -v          # shim + feature_set_ref
 ```

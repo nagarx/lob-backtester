@@ -92,6 +92,67 @@ class TestPy263ReadabilityAnnualization:
         )
 
 
+class TestPy263ReadabilityLedgerAnnualizationPersisted:
+    """G1a / #PY-263 (2026-05-30 sister-symmetry fix): the resolved annualization
+    comparability key (``resolved_periods_per_day`` + ``annualization_factor``)
+    must be PERSISTED into the readability hft-ops LEDGER record — the cross-run
+    query surface ``compare_experiments`` reads — top-level to match the regression
+    sister-record (``run_regression_backtest.py:653-654``, locked by
+    ``test_run_regression_backtest_manifest.py::TestPy263AnnualizationPersisted``).
+
+    The original G1a (commit a646187) wrote this only into the readability
+    *registry* ``config_dict`` (nested under ``"annualization"``), leaving the
+    hft-ops ledger record WITHOUT the key, so readability runs silently mis-grouped
+    against regression runs in any annualization-keyed ledger query — partially
+    defeating G1a's own cross-run-comparability goal. Regression-lock: dropping the
+    two keys from the readability ledger record makes this test fail.
+    """
+
+    def test_resolved_annualization_persisted_in_ledger_record(self, tmp_path: Path):
+        signal_dir = _construct_mock_signal_dir(tmp_path / "signals" / "test", n_samples=120)
+        manifest_path = tmp_path / "experiments" / "test_manifest.yaml"
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_text(
+            "experiment:\n"
+            "  name: test_readability_annualization\n"
+        )
+        result = subprocess.run(
+            [
+                sys.executable, str(READABILITY_SCRIPT),
+                "--signals", str(signal_dir),
+                "--name", "py263_readability_ledger",
+                "--exchange", "XNAS",
+                "--output-dir", str(tmp_path / "outputs"),
+                "--manifest", str(manifest_path),
+                "--bin-seconds", "60",
+                "--no-zero-dte",
+            ],
+            capture_output=True, text=True, timeout=120,
+        )
+        assert result.returncode == 0, (
+            f"Script failed: stdout={result.stdout[-500:]} stderr={result.stderr[-500:]}"
+        )
+        record_path = (
+            manifest_path.parent.parent / "ledger" / "runs"
+            / "test_readability_annualization_backtest_py263_readability_ledger.json"
+        )
+        assert record_path.exists(), (
+            f"Readability ledger record NOT written at {record_path}. "
+            f"stdout tail: {result.stdout[-500:]}"
+        )
+        record = json.loads(record_path.read_text())
+        assert record.get("resolved_periods_per_day") == 390.0, (
+            "G1a/#PY-263 sister-symmetry: the readability LEDGER record must persist "
+            "top-level resolved_periods_per_day=390.0 (RTH 23400/60) to match the "
+            "regression ledger record. Got: "
+            f"{record.get('resolved_periods_per_day')}"
+        )
+        assert record.get("annualization_factor") == pytest.approx((252.0 * 390.0) ** 0.5), (
+            "G1a/#PY-263 sister-symmetry: the readability LEDGER record must persist "
+            "top-level annualization_factor = sqrt(252 * resolved_periods_per_day)."
+        )
+
+
 class TestPy305ModeAwareDefault:
     """#PY-305: sentinel-None resolution honors --delta for IV default."""
 

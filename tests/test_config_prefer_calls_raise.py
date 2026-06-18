@@ -82,3 +82,12 @@ class TestZeroDteConfigPreferCallsFalseRaises:
                 opra_costs=OpraCalibratedCosts(),
                 prefer_calls=False,
             )
+
+    def test_prefer_calls_false_allowed_under_bsm(self):
+        """B3/B4 (2026-06-19): under payoff_model='bsm', the put-block is LIFTED.
+        A real BSM put value is coherent for prefer_calls=False, so the
+        linear-delta sign-incoherence that motivated the raise no longer applies.
+        The raise remains in force for the linear_delta default (above)."""
+        config = ZeroDteConfig(enabled=True, payoff_model="bsm", prefer_calls=False)
+        assert config.prefer_calls is False
+        assert config.payoff_model == "bsm"

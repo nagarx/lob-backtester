@@ -582,6 +582,83 @@ class TestSamplingCadenceRegression:
 # ---------------------------------------------------------------------------
 
 
+class TestZeroDteBsmPayoff:
+    """B3/B4 (2026-06-19): payoff_model='bsm' replaces the linear-delta gross with
+    a real BSM payoff (V_exit - V_entry)*100*contracts. Theta is ENDOGENOUS in the
+    tau-shrink (tau_exit < tau_entry), so there is NO separate theta cost (avoids
+    double-counting). The linear_delta default is unchanged (TestZeroDteAssembledPnlGolden)."""
+
+    def _one_leg_result(self, entry_price, exit_price, side=TradeSide.BUY, hold=10):
+        trades = [
+            Trade(index=0, side=side, price=entry_price, size=1, cost=0.0),
+            Trade(index=hold, side=TradeSide.FLAT, price=exit_price, size=1, cost=0.0),
+        ]
+        n = hold + 1
+        return BacktestResult(
+            equity_curve=np.array([100000.0] * n), returns=np.zeros(n - 1),
+            positions=np.zeros(n), prices=np.array([entry_price] * n),
+            predictions=np.zeros(n), labels=None, trades=trades,
+            trade_pnls=np.array([0.0]), metrics={}, config_dict={},
+            initial_capital=100000.0, final_equity=100000.0, total_trades=2,
+            start_index=0, end_index=n - 1,
+        )
+
+    def _bsm_transformer(self, **kw):
+        config = ZeroDteConfig(
+            enabled=True, payoff_model="bsm", moneyness=kw.pop("moneyness", 1.0),
+            opra_costs=OpraCalibratedCosts(
+                atm_call_half_spread=0.015, atm_put_half_spread=0.010,
+                commission_per_contract=0.70, implied_vol=0.40,
+                entry_minutes_before_close=120.0,
+            ),
+            **kw,
+        )
+        return ZeroDtePnLTransformer(config, events_per_minute=1.0)
+
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
+    def test_flat_roundtrip_is_pure_theta_loss_no_separate_theta(self):
+        """S unchanged (100->100): the tau-shrink decays the call value -> gross < 0
+        (the realized theta), AND theta_costs == 0 (endogenous, NOT a separate
+        bolt-on -> no double-count)."""
+        out = self._bsm_transformer().transform(self._one_leg_result(100.0, 100.0))
+        assert out.theta_costs[0] == pytest.approx(0.0), (
+            "bsm theta is endogenous in the tau-shrink; no separate theta cost"
+        )
+        assert out.option_trade_pnls[0] < 0.0  # gross(<0) - spread - comm
+
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
+    def test_call_gains_on_up_move(self):
+        """BUY call, S 100 -> 105: V_exit(105) > V_entry(100) -> positive option P&L
+        (the +5 move dominates the single-contract spread+comm)."""
+        out = self._bsm_transformer().transform(self._one_leg_result(100.0, 105.0))
+        assert out.option_trade_pnls[0] > 0.0
+
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
+    def test_bsm_differs_from_linear_delta(self):
+        """The convex BSM payoff differs from the linear-delta proxy on the same trade."""
+        res = self._one_leg_result(100.0, 105.0)
+        out_bsm = self._bsm_transformer().transform(res)
+        lin_config = ZeroDteConfig(
+            enabled=True, delta=0.50,
+            opra_costs=OpraCalibratedCosts(
+                atm_call_half_spread=0.015, commission_per_contract=0.70,
+                implied_vol=0.40, entry_minutes_before_close=120.0,
+            ),
+        )
+        out_lin = ZeroDtePnLTransformer(lin_config, events_per_minute=1.0).transform(res)
+        assert out_bsm.option_trade_pnls[0] != pytest.approx(out_lin.option_trade_pnls[0])
+
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
+    def test_put_via_prefer_calls_false_under_bsm_gains_on_down_move(self):
+        """Under bsm, prefer_calls=False maps BUY-entry -> put (block lifted). A long
+        put gains when S falls (100 -> 90)."""
+        out = self._bsm_transformer(prefer_calls=False).transform(
+            self._one_leg_result(100.0, 90.0, side=TradeSide.BUY)
+        )
+        assert bool(out.is_call[0]) is False  # prefer_calls=False, BUY -> put
+        assert out.option_trade_pnls[0] > 0.0  # long put gains on the down move
+
+
 class TestZeroDteAssembledPnlGolden:
     """Value-lock the ASSEMBLED 0DTE option P&L — the headline Deep-ITM money-math.
 

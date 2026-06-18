@@ -49,6 +49,29 @@ class TestCostConfig:
         cost = config.compute_cost(10000)
         assert abs(cost - 2.50) < 0.001
 
+    def test_use_realized_spread_default_false(self):
+        """B1: the realized-spread flag is OFF by default (back-compat)."""
+        assert CostConfig().use_realized_spread is False
+
+    def test_compute_cost_spread_bps_none_is_flat(self):
+        """B1: spread_bps=None (default) == the flat-spread cost (bit-identical)."""
+        config = CostConfig(spread_bps=10.0, slippage_bps=0.0, taker_fee_bps=0.0)
+        assert config.compute_cost(10000, spread_bps=None) == pytest.approx(
+            config.compute_cost(10000)
+        )
+        assert config.compute_cost(10000) == pytest.approx(10.0)  # 10000*10/1e4
+
+    def test_compute_cost_spread_bps_override_replaces_only_spread(self):
+        """B1: a provided spread_bps replaces ONLY the spread component;
+        slippage + taker + commission are kept."""
+        config = CostConfig(
+            spread_bps=10.0, slippage_bps=2.0, taker_fee_bps=1.0, commission_per_trade=0.5
+        )
+        # override spread 10 -> 4: 10000*(4+2+1)/1e4 + 0.5 = 7 + 0.5 = 7.5
+        assert config.compute_cost(10000, spread_bps=4.0) == pytest.approx(7.5)
+        # no override: 10000*(10+2+1)/1e4 + 0.5 = 13.5
+        assert config.compute_cost(10000) == pytest.approx(13.5)
+
     def test_negative_spread_raises(self):
         """Test that negative spread raises error."""
         with pytest.raises(ValueError, match="spread_bps must be >= 0"):
@@ -346,6 +369,16 @@ class TestBacktestConfig:
         assert restored.zero_dte.delta == 0.95
         assert restored.zero_dte.max_holding_minutes == 99.0
         assert restored.zero_dte.contracts_per_trade == 3
+
+    def test_zero_dte_payoff_model_moneyness_roundtrip_B3B4(self):
+        """B3/B4 (2026-06-19): payoff_model + moneyness survive to_dict -> from_dict."""
+        from lobbacktest.config import ZeroDteConfig
+        original = BacktestConfig(
+            zero_dte=ZeroDteConfig(enabled=True, payoff_model="bsm", moneyness=0.9),
+        )
+        restored = BacktestConfig.from_dict(original.to_dict())
+        assert restored.zero_dte.payoff_model == "bsm"
+        assert restored.zero_dte.moneyness == pytest.approx(0.9)
 
     def test_PY334_save_yaml_is_atomic_overwrite(self):
         """#PY-334 (2026-05-29): save_yaml routes through the atomic_write_binary

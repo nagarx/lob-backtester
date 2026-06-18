@@ -32,12 +32,18 @@ from typing import List, Optional
 import numpy as np
 
 from lobbacktest.config import ZeroDteConfig, OpraCalibratedCosts
+from lobbacktest.engine.option_pricing import bs_value
 from lobbacktest.types import BacktestResult, Trade, TradeSide
 
 
 EPS = 1e-12
 NPRIME_ZERO = 1.0 / math.sqrt(2.0 * math.pi)
 TRADING_MINUTES_PER_YEAR = 252.0 * 390.0
+# B3/B4 (2026-06-19): risk-free rate for the BSM payoff. Negligible at intraday
+# tau (e^{-r*tau} ~= 1 for tau ~ hours), so 0.0 is a defensible MVP default; named
+# explicitly (not omitted). Promote to config if a longer-dated deep-ITM leg ever
+# makes r*tau material.
+_BSM_RISK_FREE_RATE = 0.0
 
 
 def theta_bsm_per_share(
@@ -402,7 +408,31 @@ class ZeroDtePnLTransformer:
                 )
             underlying_moves_arr[i] = move_bps
 
-            gross_pnl = delta * (move_bps / 10000.0) * entry_price * 100 * contracts
+            if self.config.payoff_model == "bsm":
+                # Phase 4 B2/B3 (2026-06-19): real BSM payoff. Theta is ENDOGENOUS
+                # in the tau-shrink (V at tau_exit < tau_entry), so there is NO
+                # separate theta cost (avoids double-counting). Static sigma
+                # (Delta-sigma=0, vega P&L assumed zero — a labeled MVP; per-bin IV
+                # is a deferred additive feed). K = moneyness * entry_price.
+                strike = self.config.moneyness * entry_price
+                sigma = oc.implied_vol
+                tau_entry = oc.entry_minutes_before_close / TRADING_MINUTES_PER_YEAR
+                tau_exit = max(
+                    oc.entry_minutes_before_close - holding_minutes, 0.0
+                ) / TRADING_MINUTES_PER_YEAR
+                v_entry = bs_value(is_call, entry_price, strike, tau_entry, _BSM_RISK_FREE_RATE, sigma)
+                v_exit = bs_value(is_call, exit_price, strike, tau_exit, _BSM_RISK_FREE_RATE, sigma)
+                gross_pnl = (v_exit - v_entry) * 100 * contracts
+                theta_cost = 0.0  # endogenous in the tau-shrink; not double-counted
+            else:  # "linear_delta" (default, back-compat — unchanged)
+                gross_pnl = delta * (move_bps / 10000.0) * entry_price * 100 * contracts
+                theta_cost_per_share = theta_bsm_per_share(
+                    underlying_price=entry_price,
+                    implied_vol=oc.implied_vol,
+                    minutes_remaining=oc.entry_minutes_before_close,
+                    holding_minutes=holding_minutes,
+                )
+                theta_cost = theta_cost_per_share * 100 * contracts
 
             half_sp = oc.half_spread(is_call)
             spread_cost = 2 * half_sp * 100 * contracts
@@ -411,13 +441,6 @@ class ZeroDtePnLTransformer:
             comm_cost = 2 * oc.commission_per_contract * contracts
             commission_costs_arr[i] = comm_cost
 
-            theta_cost_per_share = theta_bsm_per_share(
-                underlying_price=entry_price,
-                implied_vol=oc.implied_vol,
-                minutes_remaining=oc.entry_minutes_before_close,
-                holding_minutes=holding_minutes,
-            )
-            theta_cost = theta_cost_per_share * 100 * contracts
             theta_costs_arr[i] = theta_cost
 
             option_pnls[i] = gross_pnl - spread_cost - comm_cost - theta_cost

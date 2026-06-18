@@ -259,6 +259,9 @@ class VectorizedEngine:
         """
         n = len(data)
         prices = data.prices
+        # B1 (2026-06-19): reset the once-per-run guard for the realized-spread
+        # fallback WARN (set by _realized_spread_bps on NaN/missing per-row spread).
+        self._spread_warn_emitted = False
 
         # Generate signals
         signal_output = strategy.generate_signals(prices)
@@ -306,7 +309,10 @@ class VectorizedEngine:
             if signal == Signal.BUY:
                 if current_position.is_short:
                     # Close short position first
-                    cash_flow, cost, pnl = self._close_position(current_position, price)
+                    cash_flow, cost, pnl = self._close_position(
+                        current_position, price,
+                        spread_bps_override=self._realized_spread_bps(data, i),
+                    )
                     cash += cash_flow - cost
                     # P2 FIX: Include BOTH entry and exit costs in trade_pnls
                     trade_pnls.append(pnl - cost - current_position.entry_cost)
@@ -326,7 +332,9 @@ class VectorizedEngine:
                     size = self._compute_position_size(cash, price)
                     if size > 0:
                         position_value = size * price
-                        cost = self.config.costs.compute_cost(position_value)
+                        cost = self.config.costs.compute_cost(
+                            position_value, spread_bps=self._realized_spread_bps(data, i)
+                        )
                         # Deduct BOTH position value AND cost from cash
                         # (we're "buying" shares, so cash decreases)
                         cash -= (position_value + cost)
@@ -354,7 +362,10 @@ class VectorizedEngine:
                 else:
                     if current_position.is_long:
                         # Close long position first
-                        cash_flow, cost, pnl = self._close_position(current_position, price)
+                        cash_flow, cost, pnl = self._close_position(
+                            current_position, price,
+                            spread_bps_override=self._realized_spread_bps(data, i),
+                        )
                         cash += cash_flow - cost
                         # P2 FIX: Include BOTH entry and exit costs in trade_pnls
                         trade_pnls.append(pnl - cost - current_position.entry_cost)
@@ -376,7 +387,9 @@ class VectorizedEngine:
                         size = self._compute_position_size(cash, price)
                         if size > 0:
                             position_value = size * price
-                            cost = self.config.costs.compute_cost(position_value)
+                            cost = self.config.costs.compute_cost(
+                                position_value, spread_bps=self._realized_spread_bps(data, i)
+                            )
                             # C3 FIX: Deduct position_value as margin + cost (same as longs)
                             cash -= (position_value + cost)
                             current_position = Position(
@@ -398,7 +411,10 @@ class VectorizedEngine:
 
             elif signal == Signal.EXIT:
                 if not current_position.is_flat:
-                    cash_flow, cost, pnl = self._close_position(current_position, price)
+                    cash_flow, cost, pnl = self._close_position(
+                        current_position, price,
+                        spread_bps_override=self._realized_spread_bps(data, i),
+                    )
                     cash += cash_flow - cost
                     # P2 FIX: Include BOTH entry and exit costs in trade_pnls
                     trade_pnls.append(pnl - cost - current_position.entry_cost)
@@ -438,7 +454,10 @@ class VectorizedEngine:
         # Close any remaining position at end
         if not current_position.is_flat:
             final_price = prices[-1]
-            cash_flow, cost, pnl = self._close_position(current_position, final_price)
+            cash_flow, cost, pnl = self._close_position(
+                current_position, final_price,
+                spread_bps_override=self._realized_spread_bps(data, n - 1),
+            )
             cash += cash_flow - cost
             # FIND-001 fix (2026-05-14): emit Trade(side=FLAT) atomically with trade_pnls.append.
             # Pre-fix: only trade_pnls.append fired; zero_dte.py silent break masked the orphan.
@@ -547,10 +566,46 @@ class VectorizedEngine:
 
         return max(0.0, size)
 
+    def _realized_spread_bps(self, data: "BacktestData", i: int) -> Optional[float]:
+        """Per-leg realized spread cost (HALF the per-row quoted bid-ask) in bps,
+        or None to use the configured flat ``spread_bps``.
+
+        B1 (2026-06-19): active only when ``config.costs.use_realized_spread``. A
+        round-trip crosses the spread twice (buy at the ask, sell at the bid), so
+        each leg pays half the quoted spread. Falls back to the flat spread
+        (returns None) + WARNs once per run when the per-row spread is unavailable
+        / non-finite / negative — observation-tier, never crashes the backtest.
+        """
+        if not self.config.costs.use_realized_spread:
+            return None
+        spreads = data.spreads
+        if spreads is None or i >= len(spreads):
+            if not self._spread_warn_emitted:
+                logger.warning(
+                    "use_realized_spread=True but per-row spreads are unavailable "
+                    "(%s); falling back to flat spread_bps.",
+                    "data.spreads is None" if spreads is None else f"len={len(spreads)} <= i={i}",
+                )
+                self._spread_warn_emitted = True
+            return None
+        s = float(spreads[i])
+        if not np.isfinite(s) or s < 0.0:
+            if not self._spread_warn_emitted:
+                logger.warning(
+                    "use_realized_spread=True but a per-row spread is non-finite/"
+                    "negative (spread[%d]=%s); falling back to flat spread_bps for "
+                    "affected bars.", i, s,
+                )
+                self._spread_warn_emitted = True
+            return None
+        return s / 2.0  # half-spread = per-leg taker crossing cost
+
     def _close_position(
         self,
         position: Position,
         price: float,
+        *,
+        spread_bps_override: Optional[float] = None,
     ) -> Tuple[float, float, float]:
         """
         Close a position and compute proceeds (for longs) or settlement (for shorts).
@@ -577,7 +632,9 @@ class VectorizedEngine:
         if position.is_flat:
             return 0.0, 0.0, 0.0
 
-        cost = self.config.costs.compute_cost(position.size * price)
+        cost = self.config.costs.compute_cost(
+            position.size * price, spread_bps=spread_bps_override
+        )
 
         if position.is_long:
             # Selling shares: receive full proceeds (return position_value + P&L)

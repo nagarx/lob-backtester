@@ -74,6 +74,9 @@ class CostConfig:
     exchange: Optional[str] = None
     maker_rebate_bps: float = 0.0
     taker_fee_bps: float = 0.0
+    use_realized_spread: bool = False  # B1 (2026-06-19): when True, the engine
+    # replaces the flat `spread_bps` component with the per-row realized
+    # half-spread from `data.spreads` (NaN/missing -> flat fallback + WARN).
 
     # Phase 6 6A.6 (2026-04-17): removed dead `EXCHANGE_PRESETS` field.
     # It was a per-instance default_factory dict never read by any method
@@ -122,18 +125,26 @@ class CostConfig:
         """Total variable cost in basis points (excludes fixed commission)."""
         return self.spread_bps + self.slippage_bps + self.taker_fee_bps
 
-    def compute_cost(self, notional: float) -> float:
+    def compute_cost(self, notional: float, *, spread_bps: Optional[float] = None) -> float:
         """
         Compute total transaction cost for a trade.
 
         Args:
             notional: Trade value in USD (price x size)
+            spread_bps: Optional per-trade realized spread component (bps) that
+                REPLACES the configured flat ``self.spread_bps`` (B1, 2026-06-19).
+                When ``None`` (default) the flat ``self.spread_bps`` is used —
+                bit-identical to the pre-B1 behaviour. ``slippage_bps`` +
+                ``taker_fee_bps`` + ``commission_per_trade`` are unchanged. The
+                caller (``VectorizedEngine`` under ``use_realized_spread``) passes
+                the per-leg half-spread.
 
         Returns:
             Total cost in USD
         """
-        variable_cost = notional * (self.total_bps / 10000.0)
-        return variable_cost + self.commission_per_trade
+        spread_component = self.spread_bps if spread_bps is None else spread_bps
+        variable_bps = spread_component + self.slippage_bps + self.taker_fee_bps
+        return notional * (variable_bps / 10000.0) + self.commission_per_trade
 
 
 @dataclass
@@ -316,6 +327,8 @@ class ZeroDteConfig:
     entry_window_end_et: str = "15:30"
     events_per_minute: Optional[float] = None
     bin_seconds: Optional[float] = None
+    payoff_model: Literal["linear_delta", "bsm"] = "linear_delta"  # B3/B4 (2026-06-19)
+    moneyness: float = 1.0  # B3/B4: BSM strike = moneyness * entry_price (1.0 = ATM)
 
     def __post_init__(self) -> None:
         if self.delta <= 0.0 or self.delta > 1.0:
@@ -324,6 +337,12 @@ class ZeroDteConfig:
             raise ValueError(f"max_holding_minutes must be > 0, got {self.max_holding_minutes}")
         if self.contracts_per_trade < 1:
             raise ValueError(f"contracts_per_trade must be >= 1, got {self.contracts_per_trade}")
+        if self.payoff_model not in ("linear_delta", "bsm"):
+            raise ValueError(
+                f"payoff_model must be 'linear_delta' or 'bsm', got {self.payoff_model!r}"
+            )
+        if self.moneyness <= 0.0:
+            raise ValueError(f"moneyness must be > 0, got {self.moneyness}")
         # Wave 2-H H3 + Wave 1A F2 closure (2026-05-17): fail-loud on
         # `prefer_calls=False`. The option-P&L formula at
         # engine/zero_dte.py:354-375 hardcodes ATM-call-like delta sign;
@@ -334,9 +353,11 @@ class ZeroDteConfig:
         # exposure per hft-rules §5 fail-fast + §8 never silently produce
         # incoherent semantics. See #PY-311 for full PUT delta sign-convention
         # plumbing (4-6 hr Phase Z architectural; deferred).
-        if not self.prefer_calls:
+        if not self.prefer_calls and self.payoff_model == "linear_delta":
             raise ValueError(
-                "ZeroDteConfig: prefer_calls=False is not yet supported. The "
+                "ZeroDteConfig: prefer_calls=False is not supported under "
+                "payoff_model='linear_delta' (use payoff_model='bsm' for a real "
+                "BSM put value). The "
                 "option-P&L formula at engine/zero_dte.py:354-375 is "
                 "ATM-call-only; PUT delta sign convention is not wired through "
                 "Trade dataclass. Selecting prefer_calls=False would produce "
@@ -745,6 +766,8 @@ class BacktestConfig:
             "entry_window_start_et": self.zero_dte.entry_window_start_et,
             "entry_window_end_et": self.zero_dte.entry_window_end_et,
             "opra_costs": self.zero_dte.opra_costs.to_dict(),
+            "payoff_model": self.zero_dte.payoff_model,
+            "moneyness": self.zero_dte.moneyness,
             # FIND-NEW-01 closure (2026-05-16): emit sampling-cadence
             # fields so YAML round-trip preserves operator-set values.
             # Only emit when non-None to keep YAML compact for legacy
@@ -816,6 +839,8 @@ class BacktestConfig:
             # ``events_per_minute`` directly at transformer construction.
             events_per_minute=dte_dict.get("events_per_minute"),
             bin_seconds=dte_dict.get("bin_seconds"),
+            payoff_model=dte_dict.get("payoff_model", "linear_delta"),
+            moneyness=dte_dict.get("moneyness", 1.0),
         )
 
         return cls(

@@ -345,6 +345,84 @@ class TestEnginePnlValueLocked:
         assert result.trade_pnls[0] == pytest.approx(1000.0)
 
 
+class TestRealizedSpreadCost:
+    """B1 (2026-06-19): per-row realized bid-ask spread cost behind
+    CostConfig.use_realized_spread (default False = flat, bit-identical).
+    Each leg pays HALF the per-row quoted spread (a round-trip crosses it twice)."""
+
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
+    @pytest.mark.filterwarnings("ignore::RuntimeWarning")
+    def test_realized_spread_per_row_cost(self):
+        """BUY 100sh @ $100 (entry spread 20bps -> half 10bps on $10k = $10),
+        EOF-close @ $110 (exit spread 40bps -> half 20bps on $11k = $22):
+        trade_pnl = 1000 - 10 - 22 = $968."""
+        prices = np.array([100.0, 110.0])
+        predictions = np.array([1, 0])
+        spreads = np.array([20.0, 40.0])  # full quoted bid-ask, bps
+        config = BacktestConfig(
+            initial_capital=100_000.0, position_size=0.1,
+            costs=CostConfig(spread_bps=10.0, slippage_bps=0.0, taker_fee_bps=0.0,
+                             use_realized_spread=True),
+        )
+        result = VectorizedEngine(config).run(
+            BacktestData(prices=prices, spreads=spreads),
+            DirectionStrategy(predictions, shifted=False),
+        )
+        assert result.trade_pnls[0] == pytest.approx(968.0), result.trade_pnls
+
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
+    @pytest.mark.filterwarnings("ignore::RuntimeWarning")
+    def test_realized_spread_false_ignores_spreads(self):
+        """use_realized_spread=False (default): per-row spreads are IGNORED; the
+        flat spread_bps=10 yields the locked $979 regardless of data.spreads."""
+        prices = np.array([100.0, 110.0])
+        predictions = np.array([1, 0])
+        spreads = np.array([20.0, 40.0])
+        config = BacktestConfig(
+            initial_capital=100_000.0, position_size=0.1,
+            costs=CostConfig(spread_bps=10.0, slippage_bps=0.0),  # flag defaults False
+        )
+        result = VectorizedEngine(config).run(
+            BacktestData(prices=prices, spreads=spreads),
+            DirectionStrategy(predictions, shifted=False),
+        )
+        assert result.trade_pnls[0] == pytest.approx(979.0), result.trade_pnls
+
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
+    @pytest.mark.filterwarnings("ignore::RuntimeWarning")
+    def test_realized_spread_nan_falls_back_to_flat(self):
+        """use_realized_spread=True but NaN per-row spread -> flat fallback (no
+        crash); flat spread_bps=10 gives $979 (not a NaN cost)."""
+        prices = np.array([100.0, 110.0])
+        predictions = np.array([1, 0])
+        spreads = np.array([np.nan, np.nan])
+        config = BacktestConfig(
+            initial_capital=100_000.0, position_size=0.1,
+            costs=CostConfig(spread_bps=10.0, slippage_bps=0.0, use_realized_spread=True),
+        )
+        result = VectorizedEngine(config).run(
+            BacktestData(prices=prices, spreads=spreads),
+            DirectionStrategy(predictions, shifted=False),
+        )
+        assert result.trade_pnls[0] == pytest.approx(979.0), result.trade_pnls
+
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
+    @pytest.mark.filterwarnings("ignore::RuntimeWarning")
+    def test_realized_spread_true_but_no_spreads_falls_back(self):
+        """use_realized_spread=True but data.spreads is None -> flat fallback ($979)."""
+        prices = np.array([100.0, 110.0])
+        predictions = np.array([1, 0])
+        config = BacktestConfig(
+            initial_capital=100_000.0, position_size=0.1,
+            costs=CostConfig(spread_bps=10.0, slippage_bps=0.0, use_realized_spread=True),
+        )
+        result = VectorizedEngine(config).run(
+            BacktestData(prices=prices),  # no spreads
+            DirectionStrategy(predictions, shifted=False),
+        )
+        assert result.trade_pnls[0] == pytest.approx(979.0), result.trade_pnls
+
+
 class TestTradePnlCosts:
     """P2 FIX: trade_pnls must include BOTH entry and exit costs."""
 

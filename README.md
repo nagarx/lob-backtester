@@ -6,6 +6,8 @@ Standalone backtesting library for evaluating LOB prediction models trained with
 
 **Version**: 0.1.0 | **Tests**: 628 (612 passed + 16 skipped)
 
+> **Pipeline scope (2026-06-02).** This module is part of an **intraday trading research pipeline** — an experiment-first platform for discovering and validating *any* profitable **intraday** trading edge (no overnight positions), across approach classes (microstructure/HFT, scalping, intraday momentum, intraday statistical arbitrage, …) and instruments (equities, futures, same-day options). The pipeline *originated* as a high-frequency NVDA MBO/LOB microstructure system — that origin explains the "HFT" / "LOB" / "MBO" naming here — and that microstructure-direction program is now one (largely-closed) track among many. **Names are historical; the mission is general.** This module's role: the P&L backtester — a generic single-asset linear long/flat/short engine (`VectorizedEngine`) with an optional, separable 0DTE-options overlay (`ZeroDtePnLTransformer`) and IBKR-calibrated costs; reusable for equity/futures intraday directional P&L. For the full mission + approach taxonomy + capability-readiness boundary, see root `CLAUDE.md` §Research Scope & Charter (+ `CROSS_ASSET_OFI_FINDINGS_AND_ISSUES_2026_06_01.md` §9).
+
 ---
 
 ## Overview

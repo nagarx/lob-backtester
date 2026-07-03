@@ -56,7 +56,14 @@ class CostConfig:
         slippage_bps: Market impact / slippage per trade (default: 0.5 bp)
         commission_per_trade: Fixed commission per trade in USD (default: 0.0)
         exchange: Exchange name for preset costs (optional: "XNAS", "ARCX")
-        maker_rebate_bps: Maker rebate in bps (negative = rebate, default: 0.0)
+        maker_rebate_bps: Maker rebate in bps (negative = rebate, default: 0.0).
+            WARNING (FINDING-046, hft-wiki): a RETAIL operator PAYS the maker
+            fee structure and does NOT earn the exchange rebate — the negative
+            preset values in _EXCHANGE_PRESETS encode a false "retail earns
+            the rebate" assumption and MUST NOT be used for retail-tier
+            honesty. Any maker-side evaluation must use the effective IBKR
+            fee plus a fill-conditional adverse-selection markout (see the B3
+            fill-sim spec, hft-wiki EXPERIMENT-PLAN-022).
         taker_fee_bps: Taker fee in bps (default: 0.0)
 
     Exchange-calibrated presets (from mbo-statistical-profiler):

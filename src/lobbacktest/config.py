@@ -237,6 +237,15 @@ class OpraCalibratedCosts:
         Spreads are tighter (deep ITM options have narrower markets),
         theta is negligible. Commission is the same.
 
+        WARNING (2026-07-05 doc-audit): the deep-ITM ``half_spread_per_contract``
+        (``$0.005``) is an ASSUMPTION, NOT derived from the 316-fill IBKR
+        calibration (those fills are ATM/near-money). OPRA-measured deep-ITM
+        spreads are MATERIALLY WIDER than assumed, so the resulting ~1.4 bps
+        deep-ITM breakeven is OPTIMISTIC, not conservative — a signal judged
+        "cost-walled just below 1.4 bps" is even further from tradeable at
+        realistic deep-ITM cost. The "narrower markets" line is by-liquidity
+        intuition, not an OPRA-measured fact.
+
         #PY-273 closure (2026-05-16): default ``implied_vol=0.25``
         reflects OPRA empirical Deep ITM IV-skew (~0.20-0.30 vs ATM's
         0.40). Pre-#PY-273 default (0.40) inherited ATM IV and

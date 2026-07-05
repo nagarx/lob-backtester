@@ -1,6 +1,6 @@
 # Backtest Index
 
-**Living ledger of all backtest experiments.** Updated after every run.
+**Backtest-experiment ledger.** ⚠️ **FROZEN at the Phase-1 boundary (last real round R-20 HMHP-R, 2026-05-19).** The 2026-06/07 discovery arc ran `run(config)→verdict` harnesses, not this ledger. **Current authority: `hft-wiki/FINDINGS_MASTER_REGISTER.md` + the discovery `results/*.json`.**
 
 ---
 

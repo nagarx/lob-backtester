@@ -85,59 +85,60 @@ pyyaml = ">=6.0"       # Configuration loading
 ## 2. Module Architecture
 
 ```
-src/lobbacktest/
-├── __init__.py          # Public API exports
-├── version.py           # Version information
-├── types.py             # Core types: Trade, Position, BacktestResult
-├── config.py            # Configuration: BacktestConfig, CostConfig, ZeroDteConfig, OpraCalibratedCosts
-├── registry.py          # BacktestRegistry — append-only backtest-experiment/result registry (+ BacktestSummary)
+lob-backtester/
+├── src/lobbacktest/
+│   ├── __init__.py          # Public API exports
+│   ├── version.py           # Version information
+│   ├── types.py             # Core types: Trade, Position, BacktestResult
+│   ├── config.py            # Configuration: BacktestConfig, CostConfig, ZeroDteConfig, OpraCalibratedCosts
+│   ├── registry.py          # BacktestRegistry — append-only backtest-experiment/result registry (+ BacktestSummary)
+│   │
+│   ├── data/                # Data loading and preprocessing
+│   │   ├── __init__.py
+│   │   ├── loader.py        # DataLoader: Load exported data
+│   │   └── prices.py        # PriceExtractor: Denormalize prices
+│   │
+│   ├── strategies/          # Trading strategy implementations
+│   │   ├── __init__.py      # Exports all strategies
+│   │   ├── base.py          # Strategy ABC, Signal enum, SignalOutput
+│   │   ├── direction.py     # DirectionStrategy, ThresholdStrategy
+│   │   ├── readability.py   # ReadabilityStrategy (HMHP agreement + confidence gate)
+│   │   ├── regression.py    # RegressionStrategy (magnitude gate for continuous predictions)
+│   │   ├── hybrid.py        # ReadabilityHybridStrategy (classification direction + regression magnitude)
+│   │   ├── holding.py       # HoldingPolicy, HorizonAlignedPolicy, HoldingState
+│   │   └── twap.py          # TWAPStrategy (time-weighted execution)
+│   │
+│   ├── engine/              # Backtest execution
+│   │   ├── __init__.py
+│   │   ├── vectorized.py    # VectorizedEngine, Backtester, BacktestData
+│   │   ├── zero_dte.py      # ZeroDtePnLTransformer, ZeroDteResult (0DTE options P&L; payoff_model linear_delta|bsm)
+│   │   └── option_pricing.py # BSM valuation: bs_value/bs_call/bs_put/bs_delta/bs_gamma/bs_vega (q=0; put floored at intrinsic)
+│   │
+│   ├── metrics/             # Performance metrics
+│   │   ├── __init__.py
+│   │   ├── base.py          # Metric ABC, MetricResult
+│   │   ├── returns.py       # TotalReturn, AnnualReturn
+│   │   ├── risk.py          # SharpeRatio, SortinoRatio, MaxDrawdown, CalmarRatio
+│   │   ├── trading.py       # WinRate, ProfitFactor, Expectancy, etc.
+│   │   └── prediction.py    # DirectionalAccuracy, SignalRate, UpPrecision, DownPrecision
+│   │
+│   ├── stats/               # Statistics and aggregation
+│   │   ├── __init__.py
+│   │   └── stats.py         # BacktestStats fluent API
+│   │
+│   └── reports/             # Reporting and visualization
+│       ├── __init__.py
+│       ├── summary.py       # Text reports, comparison tables
+│       └── plots.py         # Equity curves, drawdown charts
 │
-├── data/                # Data loading and preprocessing
-│   ├── __init__.py
-│   ├── loader.py        # DataLoader: Load exported data
-│   └── prices.py        # PriceExtractor: Denormalize prices
-│
-├── strategies/          # Trading strategy implementations
-│   ├── __init__.py      # Exports all strategies
-│   ├── base.py          # Strategy ABC, Signal enum, SignalOutput
-│   ├── direction.py     # DirectionStrategy, ThresholdStrategy
-│   ├── readability.py   # ReadabilityStrategy (HMHP agreement + confidence gate)
-│   ├── regression.py    # RegressionStrategy (magnitude gate for continuous predictions)
-│   ├── hybrid.py        # ReadabilityHybridStrategy (classification direction + regression magnitude)
-│   ├── holding.py       # HoldingPolicy, HorizonAlignedPolicy, HoldingState
-│   └── twap.py          # TWAPStrategy (time-weighted execution)
-│
-├── engine/              # Backtest execution
-│   ├── __init__.py
-│   ├── vectorized.py    # VectorizedEngine, Backtester, BacktestData
-│   ├── zero_dte.py      # ZeroDtePnLTransformer, ZeroDteResult (0DTE options P&L; payoff_model linear_delta|bsm)
-│   └── option_pricing.py # BSM valuation: bs_value/bs_call/bs_put/bs_delta/bs_gamma/bs_vega (q=0; put floored at intrinsic)
-│
-├── metrics/             # Performance metrics
-│   ├── __init__.py
-│   ├── base.py          # Metric ABC, MetricResult
-│   ├── returns.py       # TotalReturn, AnnualReturn
-│   ├── risk.py          # SharpeRatio, SortinoRatio, MaxDrawdown, CalmarRatio
-│   ├── trading.py       # WinRate, ProfitFactor, Expectancy, etc.
-│   └── prediction.py    # DirectionalAccuracy, SignalRate, UpPrecision, DownPrecision
-│
-├── stats/               # Statistics and aggregation
-│   ├── __init__.py
-│   └── stats.py         # BacktestStats fluent API
-│
-├── scripts/             # Runnable scripts (7 total)
-│   ├── backtest_deeplob.py                  # DeepLOB backtest runner
-│   ├── param_sweep.py                       # Parameter sweep (multi-config)
-│   ├── run_readability_backtest.py          # Readability strategy backtest
-│   ├── run_regression_backtest.py           # Regression strategy backtest
-│   ├── run_spread_signal_backtest.py        # Spread-based signal backtest (imports scipy.stats.norm)
-│   ├── e5_regime_filter_test.py             # E5 regime-filter diagnostic
-│   └── check_backtest_index_completeness.py # BACKTEST_INDEX completeness checker
-│
-└── reports/             # Reporting and visualization
-    ├── __init__.py
-    ├── summary.py       # Text reports, comparison tables
-    └── plots.py         # Equity curves, drawdown charts
+└── scripts/             # Runnable scripts (7 total)
+    ├── backtest_deeplob.py                  # DeepLOB backtest runner
+    ├── param_sweep.py                       # Parameter sweep (multi-config)
+    ├── run_readability_backtest.py          # Readability strategy backtest
+    ├── run_regression_backtest.py           # Regression strategy backtest
+    ├── run_spread_signal_backtest.py        # Spread-based signal backtest (imports scipy.stats.norm)
+    ├── e5_regime_filter_test.py             # E5 regime-filter diagnostic
+    └── check_backtest_index_completeness.py # BACKTEST_INDEX completeness checker
 ```
 
 ---

@@ -1,6 +1,6 @@
 # LOB-Backtester: Codebase Technical Reference
 
-> **Version**: 0.1.0 | **Tests**: 628 (612 passed + 16 skipped) | **Last Updated**: 2026-05-30 (#PY-263 annualization closure across the 3 production backtest paths — regression + readability scripts + ExperimentRunner [back-compat-default `backtest_deeplob.py` deferred: same gap but emits the DeprecationWarning, non-silent, no live manifest selects it] — R1 `run_readability_backtest.py` `bin_seconds` threading [sister to V1's run_regression fix] + G1a persist `resolved_periods_per_day`/`annualization_factor` into backtest artifacts + G1b `ExperimentRunner._build_backtest_config` zero_dte threading + G1c ExperimentRunner status banner; same-day prior: V1 #PY-263 wiring in `run_regression_backtest.py` [`--bin-seconds` threaded into the config so `resolved_periods_per_day`=390 at 60s, was the 1000.0 fallback inflating equity Sharpe/Sortino/Calmar ~1.6×] + V2 FIND-058-EXT `entry_window_*_et` dead-field warnings + value-locked engine-P&L/e2e golden tests; cumulative through CI-green + hygiene bundle 2026-05-29)  
+> **Version**: 0.1.0 | **Tests**: 666 collected (verify pass/skip: `pytest --collect-only -q | tail -1`; was 628/43-files at the 2026-05-30 #PY-263 cycle, +38 tests / +2 files from the B1-B4 engine-realism `e08fb89` + deep-ITM demo `6295d82` commits) | **Last Updated**: 2026-05-30 (#PY-263 annualization closure across the 3 production backtest paths — regression + readability scripts + ExperimentRunner [back-compat-default `backtest_deeplob.py` deferred: same gap but emits the DeprecationWarning, non-silent, no live manifest selects it] — R1 `run_readability_backtest.py` `bin_seconds` threading [sister to V1's run_regression fix] + G1a persist `resolved_periods_per_day`/`annualization_factor` into backtest artifacts + G1b `ExperimentRunner._build_backtest_config` zero_dte threading + G1c ExperimentRunner status banner; same-day prior: V1 #PY-263 wiring in `run_regression_backtest.py` [`--bin-seconds` threaded into the config so `resolved_periods_per_day`=390 at 60s, was the 1000.0 fallback inflating equity Sharpe/Sortino/Calmar ~1.6×] + V2 FIND-058-EXT `entry_window_*_et` dead-field warnings + value-locked engine-P&L/e2e golden tests; cumulative through CI-green + hygiene bundle 2026-05-29)  
 > **Purpose**: Complete technical details for LLMs and developers to understand, modify, and extend the codebase without prior context.
 
 > **Pipeline scope (2026-06-02).** This module is part of an **intraday trading research pipeline** — an experiment-first platform for discovering and validating *any* profitable **intraday** trading edge (no overnight positions), across approach classes (microstructure/HFT, scalping, intraday momentum, intraday statistical arbitrage, …) and instruments (equities, futures, same-day options). The pipeline *originated* as a high-frequency NVDA MBO/LOB microstructure system — that origin explains the "HFT" / "LOB" / "MBO" naming here — and that microstructure-direction program is now one (largely-closed) track among many. **Names are historical; the mission is general.** This module's role: the P&L backtester — a generic single-asset linear long/flat/short engine (`VectorizedEngine`) with an optional, separable 0DTE-options overlay (`ZeroDtePnLTransformer`) and IBKR-calibrated costs; reusable for equity/futures intraday directional P&L. For the full mission + approach taxonomy + capability-readiness boundary, see root `CLAUDE.md` §Research Scope & Charter (+ `CROSS_ASSET_OFI_FINDINGS_AND_ISSUES_2026_06_01.md` §9).
@@ -22,6 +22,9 @@
 - **#PY-263 annualization closure across the 3 production backtest paths** (`a646187`, 2026-05-30; pushed `origin/main`, CI run `26677870705` green) — Completes the #PY-263 silent-Sharpe-inflation fix that V1 (`00638ac`, same-day) closed only on `run_regression_backtest.py`. **R1**: `run_readability_backtest.py` threads `bin_seconds=args.bin_seconds` into its `ZeroDteConfig` + observability print (mirrors V1's `run_regression_backtest.py:437-459`) → `resolved_periods_per_day` derives 23400/bin_seconds=390 at 60s, not the 1000.0 fallback (~1.6× = sqrt(1000/390) equity Sharpe/Sortino/Calmar inflation). **G1b**: `experiment.py::_build_backtest_config` passes `zero_dte=self._build_zero_dte_config()` so the ExperimentRunner path also derives correctly; the `config.py:571-584` mutex fail-louds if a YAML sets BOTH `periods_per_day` AND `zero_dte.bin_seconds` (now also fail-louds an *ambiguous* zero_dte block — more correct per §5). **G1a**: persist `resolved_periods_per_day`+`annualization_factor` (reuse the existing BacktestConfig properties — no duplicated 23400/bin_seconds math, §0) into the regression `<name>.json` + hft-ops ledger record + readability `config_dict` so saved runs self-describe which annualization scaled their Sharpe. **G1c**: ExperimentRunner module STATUS banner (§11: hft-ops shells to the scripts, not ExperimentRunner). **Verified invariant** (3 agents + grep): the engine reads `config.zero_dte` ONLY via `resolved_periods_per_day`/`annualization_factor`/`to_dict` — NEVER branches the equity result on `zero_dte.enabled` (the 0DTE transform is a separate post-hoc `ZeroDtePnLTransformer`) → annualization-only; equity-curve/trades/trade_pnls byte-identical. New G1a ledger keys break ZERO hft-ops readers (`ExperimentLedger` reads `ledger/records/` not `ledger/runs/`; 0 field-name hits in `hft-ops/src`). +5 value-locked tests (`TestPy263ExperimentRunnerAnnualization` derives-390/events-fallback/mutex + `TestPy263ReadabilityAnnualization` + `TestPy263AnnualizationPersisted` subprocess locks). Test count 619 → 624 (608 pass + 16 skip); ZERO regressions; zero new lint. Adversarial cascade: Wave-1 ×4 (re-validated each deferred to-do FROM SCRATCH) + Wave-2 ×3 + pre-impl + mid-impl + pre-commit ×3, all APPROVE. **3 candidate "issues" REFUTED from scratch** (don't-fix-non-existent guard): N1 `maker_rebate_bps` (taker-only engine + 0DTE discards `CostConfig` → wiring it would INTRODUCE a bug — leave inert), `run_spread_signal_backtest.py:245` (inert, `metrics=[]`), the original V3/V4 "non-production" framing. **DEFERRED NEXT-CYCLE BACKLOG** (also in the `a646187` commit footer + `POST_LOB_BACKTESTER_PY263_CLOSURE_2026_05_30.md`): **(D1)** `backtest_deeplob.py` is a 4th Sharpe-reporting path with the SAME #PY-263 gap but NON-SILENT (emits the DeprecationWarning), back-compat-default (`hft-ops manifest/schema.py:241-247`), no live manifest selects it — needs new `--bin-seconds` CLI infra (~1-1.5 hr). **(D2)** hft-ops orchestrator does not auto-thread `--bin-seconds` (operator `extra_args` today) — cross-repo (~1-2 hr). **(D3) #PY-NEW-V3** DirectionalAccuracy/SignalRate computed on trading signals (`engine/vectorized.py:675-679`) → metric-hygiene cycle; NOT a free default-list edit — 4 live consumers (`scripts/param_sweep.py:220` + `reports/summary.py:74,139` + `stats/stats.py:375`). **(D4) #PY-NEW-V4** `allow_short=True` dataclass default (`config.py:495`) → **DO NOT FLIP** — it is the load-bearing put-leg mechanism (a SELL on a flat book is skipped when `allow_short=False` at `vectorized.py:350-353` → the put leg vanishes from every documented R1-R8/E5/E6 result; `ZeroDtePnLTransformer` maps SELL→put via `zero_dte.py:373`); document-only. **(D5) #PY-NEW-N1** `CostConfig.maker_rebate_bps` intentionally-inert (taker-only engine; 0DTE discards `CostConfig`) — optional doc-note, NOT a fix. **(D6)** dead-code: N2 Expectancy default-drift (engine vs `BacktestStats`, "T2.2 OPEN") / N3 orphan `reports/` (~519 LOC, 0 callers) / N5 `ReadabilityHybridStrategy` orchestrator-orphan / N6 `ExitOnReverseStrategy` dead / N7 `_build_holding_policy` vs `create_holding_policy` divergence / N9 prediction-metric family → dead-code-sweep cycle. **Cosmetic** (non-blocking): G1b attaches `enabled=True` zero_dte to the metrics config in-memory (never persisted — the ExperimentRunner registry stores `_serialize_config` not `result.config_dict`). [Intervening cycles not logged here, documented in their commit footers: CI-hygiene `a341c40` 2026-05-29 + validation/V1/V2 `00638ac` 2026-05-30.]
 - **G1a readability-ledger annualization symmetry fix** (pending commit, 2026-05-30) — Follow-up completing `a646187`'s G1a leg. A read-only adversarial re-validation of the full module (7 agents; the core money-math + the G1b annualization-only invariant + the signal-consumption contract all re-verified SOUND — ZERO production-corrupting bugs) surfaced ONE in-scope defect: the original G1a persisted `resolved_periods_per_day`/`annualization_factor` into the readability *registry* `config_dict` (nested) but NOT its hft-ops **ledger record** (`run_readability_backtest.py:480-491`), while the regression sister-record carries them top-level (`:653-654`) — so `compare_experiments` cross-run grouping silently mis-handled readability ledger rows, partially defeating G1a's own comparability goal. **Fix**: add the two keys top-level to the readability ledger record (`float()`-cast, reusing the `BacktestConfig` properties per §0 — symmetric with regression) + `TestPy263ReadabilityLedgerAnnualizationPersisted` value-locked test (PROVEN to fail without the fix via stash-revert). Test count 624 → 625 (609 pass + 16 skip); ZERO regressions; zero new lint (6 pre-existing ruff F541 unchanged). Validation also corrected two over-amplified prior-agent claims by ground-truth grep: `data/prices.py` denorm is OFF the production path (run_regression/readability consume the pre-exported `prices.npy`; denorm is used only by the test-only `DataLoader` + 2 fossils; its math at `prices.py:122` is the correct z-score inverse) — NOT "CRITICAL feeds all P&L"; `ConfusionMetrics` is dead code (zero callers) — NOT "HIGH untested". Remaining findings all LOW/non-production/cross-repo, left as-is: D3 DirectionalAccuracy/SignalRate-on-signals fires only in 2 fossil scripts' `metrics=None` path (never a persisted artifact); D1 `backtest_deeplob.py` is the hft-ops `BacktestingStage` default yet argparse-rejects the orchestrator flags (latent §5 fail-late trap; primary fix is cross-repo in hft-ops); Cap-3 sub-$100 silent undersizing + negative-equity distortion are NVDA-unreachable latents; the scripts-vs-`ExperimentRunner` two-run-path divergence is the standing years-horizon design item (mitigated by the §11 banner + tests; candidate for a shared config-builder SSoT). **Full per-finding report + test-coverage map + ranked design recommendations (R1-R7) + next-session options: `VALIDATION_FINDINGS_2026_05_30.md`.**
 - **0DTE assembled-P&L golden lock + F3 reach correction** (pending commit, 2026-05-30) — A post-compaction fresh-eye 5-agent re-validation (4 anti-anchored bottom-up from code + 1 top-down auditing the prior conclusions) **re-confirmed the SOUND verdict** (zero production-corrupting bugs; sound producer→consumer boundary; no blocking incomplete work in lob-backtester's own code) and closed the one in-scope "rely-blindly" gap. **The gap**: the headline 0DTE Deep-ITM money-math *assembly* (`zero_dte.py:405-434` — `option_trade_pnls[i]`, the `move_bps` directional sign at `:388`, the BUY→call/SELL→put `is_call` mapping at `:373`, and `option_total_return`/`option_final_equity`) had NO value-lock — only its *components* (`theta_bsm_per_share`, `round_trip_cost_per_contract`) did → a sign-flip or assembly error would silently flip the reported return and pass the full suite. Not a bug (hand-verified correct today) — a regression-guard gap on the most important output. **Closed** by `TestZeroDteAssembledPnlGolden` (3 tests in `tests/test_engine/test_zero_dte.py`): a 2-leg fixture (BUY/call 100→101 + SELL/put 100→99, `events_per_minute=1.0`) value-locks `underlying_moves_bps=[+100,+100]` (directional sign for BOTH call and short/put legs), `is_call=[True,False]`, `spread_costs=[3.0,2.0]` (is_call→half-spread selection), `option_trade_pnls=[43.2766…,44.2766…]` (the full `gross − spread − comm − theta` assembly), and the `option_equity_curve`/`option_final_equity`/`option_total_return` aggregate. Expected values were independently re-derived AND verified bit-exact against the real `transform()` by a pre-impl gate; the lock was PROVEN to bite via a stash-revert mutation test (direction sign-flip → FAIL; dropped-theta → FAIL; restore → byte-identical, pass). Test count 625 → 628 (612 pass + 16 skip); ZERO regressions; zero new lint. The asymmetric fixture prices (exit ≠ entry) are load-bearing — do NOT flatten the round-trips. **Also corrected a stale claim**: the prior `VALIDATION_FINDINGS` F3 cell read "None today (all 9 manifests override `script:`)" — **wrong**. Ground-truth grep of `hft-ops/experiments/` shows **3 enabled full-pipeline manifests do NOT override `script:`** (`nvda_tlob_h10_v1.yaml`, `nvda_tlob_h100_tb_volscaled.yaml`, `nvda_hmhp_tb_volscaled.yaml`; each `stages.backtesting.enabled: true`) → they route to the `schema.py:277` default `backtest_deeplob.py`, which defines none of the orchestrator's `--signals/--name/--max-spread-bps/--output-dir/--manifest` flags → `SystemExit(2)`. Remains **latent** (no e2e backtest-run evidence; the 3 carry the legacy `model_checkpoint`/`data_dir`/`horizon_idx` deeplob interface) and **fail-loud, not corrupting**. **CROSS-REPO action item for the hft-ops-owning session** (out of lob-backtester scope — NO hft-ops file touched this cycle): change the `BacktestingStage.script` default away from `backtest_deeplob.py`, OR make `backtest_deeplob.py` accept/`parse_known_args` the orchestrator flags, OR set `script:` explicitly on those 3 manifests; the lob-backtester-side mitigation is the prior-logged R1/R2 (delete the deeplob fossil). Full detail: `VALIDATION_FINDINGS_2026_05_30.md` §9.
+- **Phase 4 B1/B2/B3/B4 engine realism** (`e08fb89`, 2026-06-19) — greenfield realism layer. **B2**: NEW `engine/option_pricing.py` — the first BSM *valuation* code in the repo (`bs_value`/`bs_call`/`bs_put`/`bs_delta`/`bs_gamma`/`bs_vega`; q=0 / no-dividend, put floored at intrinsic; mirrors the `opra-statistical-profiler` `bsm.rs` SSoT). **B3/B4**: `ZeroDteConfig.payoff_model: Literal["linear_delta","bsm"]` + `moneyness` — under `payoff_model="bsm"` the transformer re-prices a real call OR put via `bs_value` (endogenous theta via tau-shrink over the hold; strike `= moneyness * entry_price`; static sigma), lifting the ATM-call-only `linear_delta` default; `prefer_calls=False` is now allowed under `"bsm"` (still raises under `"linear_delta"`). **B1**: `CostConfig.use_realized_spread: bool` — when True the engine swaps the flat `spread_bps` for the per-row realized half-spread from `data.spreads` (`VectorizedEngine._realized_spread_bps`, NaN/missing → flat fallback + WARN). Equity-path P&L is byte-identical when the flags are at defaults.
+- **FIND-049 deep-ITM demo** (`6295d82`, 2026-06-19) — `demos/deep_itm_monthly_direction_null_demo.py` (a ~1-month intraday deep-ITM option = the direction null).
+- **FINDING-046 maker-rebate honesty + deep-ITM cost caveat** (`f0da215` + `f8df0fc`, 2026-07-05, unpushed at time of writing) — `config.py` `CostConfig.maker_rebate_bps` carries a FINDING-046 warning (a RETAIL operator PAYS the fee and does NOT earn the exchange rebate; the negative `_EXCHANGE_PRESETS` values encode a non-retail-honest assumption — and the field is engine-INERT anyway: `total_bps`/`compute_cost` never read it). `OpraCalibratedCosts.deep_itm()` now documents the $0.005 deep-ITM half-spread → ~1.4 bps breakeven as an OPTIMISTIC, UNVALIDATED assumption (not derived from the fills). `BACKTEST_INDEX.md` frozen at the Phase-1 boundary.
 
 ## Architecture
 
@@ -29,7 +32,7 @@
 - **Strategy Pattern**: `Strategy` ABC in `strategies/base.py` + 7 concretes (direction, readability, regression, hybrid, holding policies, twap SKIP). `HoldingPolicy` ABC is composable via `CompositePolicy(mode="any"|"all")`.
 - **Metrics ABC**: `metrics/base.py::Metric` + 4 groupings across returns/risk/trading/prediction.
 - **Contract plane via hft_contracts**: `SignalManifest` canonical home at `hft_contracts.signal_manifest` (Phase 6 6B.5); `CONTENT_HASH_RE` regex imported from same SSoT (REV 2 public rename from `_CONTENT_HASH_RE`, 2026-04-20 — legacy name is a DeprecationWarning shim through 2026-10-31); `ContractError` imported from `hft_contracts.validation` (REV 2 F1 consolidation — was two independent classes); `atomic_write_json` imported from `hft_contracts.atomic_io` (REV 2 public rename from `_atomic_io`); label encoding defers to `hft_contracts.labels.LabelContract` for cross-module agreement.
-- **IBKR-calibrated 0DTE cost model**: constants calibrated from 316 real NVDA option fills; breakevens 4.9 / 3.8 / 1.4 bps for ATM Call / ATM Put / Deep ITM. Provenance in `engine/zero_dte.py` docstring + `IBKR-transactions-trades/COST_AUDIT_2026_03.md`.
+- **IBKR/OPRA-calibrated 0DTE cost model**: commission validated from real NVDA option fills; ATM half-spreads from the OPRA CMBP-1 profiler; ATM breakevens 4.9 / 3.8 bps for Call / Put. **The Deep-ITM 1.4 bps breakeven is an OPTIMISTIC, UNVALIDATED assumption** — the $0.005 deep-ITM half-spread is not derived from the fills (real deep-ITM spreads are materially wider → treat as ~3–7 bps; see `config.py` `OpraCalibratedCosts.deep_itm()` warning + root FINDING-114 + the `BACKTEST_INDEX.md` freeze). Provenance in `engine/zero_dte.py` docstring + `IBKR-transactions-trades/COST_AUDIT_2026_03.md`.
 - **Typed + dict hybrid context**: `BacktestContext` is a typed dataclass that also implements `__getitem__` / `__contains__` / `get` / `update` for backward compat with metric consumers written for dict-protocol. Migration path to pure typed access is gradual.
 
 ---
@@ -70,7 +73,9 @@ Standalone backtesting library for evaluating direction prediction models traine
 
 ```toml
 [dependencies]
+hft-contracts = ">=2.7.0" # SignalManifest/label/canonical_hash/atomic_io SSoT (load-bearing)
 numpy = ">=1.24.0"     # Core numerical operations
+scipy = ">=1.10"       # scipy.stats.norm (BSM in scripts/run_spread_signal_backtest.py)
 matplotlib = ">=3.7.0" # Visualization
 pyyaml = ">=6.0"       # Configuration loading
 ```
@@ -85,7 +90,7 @@ src/lobbacktest/
 ├── version.py           # Version information
 ├── types.py             # Core types: Trade, Position, BacktestResult
 ├── config.py            # Configuration: BacktestConfig, CostConfig, ZeroDteConfig, OpraCalibratedCosts
-├── registry.py          # Strategy registry
+├── registry.py          # BacktestRegistry — append-only backtest-experiment/result registry (+ BacktestSummary)
 │
 ├── data/                # Data loading and preprocessing
 │   ├── __init__.py
@@ -105,7 +110,8 @@ src/lobbacktest/
 ├── engine/              # Backtest execution
 │   ├── __init__.py
 │   ├── vectorized.py    # VectorizedEngine, Backtester, BacktestData
-│   └── zero_dte.py      # ZeroDtePnLTransformer, ZeroDteResult (0DTE options P&L)
+│   ├── zero_dte.py      # ZeroDtePnLTransformer, ZeroDteResult (0DTE options P&L; payoff_model linear_delta|bsm)
+│   └── option_pricing.py # BSM valuation: bs_value/bs_call/bs_put/bs_delta/bs_gamma/bs_vega (q=0; put floored at intrinsic)
 │
 ├── metrics/             # Performance metrics
 │   ├── __init__.py
@@ -119,11 +125,14 @@ src/lobbacktest/
 │   ├── __init__.py
 │   └── stats.py         # BacktestStats fluent API
 │
-├── scripts/             # Runnable scripts
-│   ├── backtest_deeplob.py         # DeepLOB backtest runner
-│   ├── param_sweep.py              # Parameter sweep (multi-config)
-│   ├── run_readability_backtest.py  # Readability strategy backtest
-│   └── run_regression_backtest.py   # Regression strategy backtest
+├── scripts/             # Runnable scripts (7 total)
+│   ├── backtest_deeplob.py                  # DeepLOB backtest runner
+│   ├── param_sweep.py                       # Parameter sweep (multi-config)
+│   ├── run_readability_backtest.py          # Readability strategy backtest
+│   ├── run_regression_backtest.py           # Regression strategy backtest
+│   ├── run_spread_signal_backtest.py        # Spread-based signal backtest (imports scipy.stats.norm)
+│   ├── e5_regime_filter_test.py             # E5 regime-filter diagnostic
+│   └── check_backtest_index_completeness.py # BACKTEST_INDEX completeness checker
 │
 └── reports/             # Reporting and visualization
     ├── __init__.py
@@ -275,9 +284,13 @@ class CostConfig:
     spread_bps: float = 1.0          # Bid-ask spread per trade
     slippage_bps: float = 0.5        # Market impact
     commission_per_trade: float = 0.0 # Fixed commission (USD)
-    exchange: str = ""                # Exchange name for presets
-    maker_rebate_bps: float = 0.0
+    exchange: Optional[str] = None    # Exchange name for presets
+    maker_rebate_bps: float = 0.0    # ENGINE-INERT (total_bps/compute_cost never read it);
+                                     # the negative _EXCHANGE_PRESETS values are NON-retail-honest
+                                     # per FINDING-046 (retail PAYS the fee, never earns the rebate)
     taker_fee_bps: float = 0.0
+    use_realized_spread: bool = False # B1 (2026-06-19): replace flat spread_bps with the per-row
+                                     # realized half-spread from data.spreads (NaN → flat + WARN)
 
     @classmethod
     def for_exchange(cls, exchange: str) -> "CostConfig":
@@ -296,11 +309,11 @@ class BacktestConfig:
     costs: CostConfig = field(default_factory=CostConfig)
     zero_dte: ZeroDteConfig = field(default_factory=ZeroDteConfig)
     allow_short: bool = True
-    fill_price: Literal["close", "midpoint"] = "close"
-    stop_loss_pct: Optional[float] = None
-    take_profit_pct: Optional[float] = None
+    fill_price: Literal["close", "midpoint"] = "close"  # 'midpoint' is DEAD CODE — engine never reads it (emits DeprecationWarning, removal 2026-10-31)
+    stop_loss_pct: Optional[float] = None   # DEAD CODE (FIND-058-EXT) — engine never reads it; emits DeprecationWarning
+    take_profit_pct: Optional[float] = None # DEAD CODE (FIND-058-EXT) — engine never reads it; emits DeprecationWarning
     trading_days_per_year: float = 252.0
-    periods_per_day: float = 1000.0
+    periods_per_day: Optional[float] = None  # #PY-263: was 1000.0; None → resolved_periods_per_day derives from zero_dte.bin_seconds (23400/bin_seconds) else legacy 1000.0 w/ DeprecationWarning
     min_confidence: Optional[float] = None  # DEPRECATED 2026-10-31 — emits DeprecationWarning; use strategy.min_confidence
     min_agreement: Optional[float] = None   # DEPRECATED 2026-10-31 — emits DeprecationWarning; use strategy.min_agreement
 ```
@@ -310,10 +323,16 @@ class BacktestConfig:
 ```python
 @dataclass
 class OpraCalibratedCosts:
-    """IBKR-validated 0DTE option cost model."""
-    commission_per_contract: float = 0.70   # IBKR median (318 fills)
+    """IBKR/OPRA-calibrated 0DTE option cost model."""
+    atm_call_half_spread: float = 0.015     # OPRA CMBP-1 profiler ($0.030 full -> $0.015 half)
+    atm_put_half_spread: float = 0.010      # OPRA CMBP-1 profiler ($0.020 full -> $0.010 half)
+    atm_call_premium: float = 1.88          # OPRA median ATM 0DTE call premium
+    atm_put_premium: float = 1.31           # OPRA median ATM 0DTE put premium
+    commission_per_contract: float = 0.70   # IBKR commission median (316-fill audit)
     implied_vol: float = 0.40
     entry_minutes_before_close: float = 120.0
+    # deep_itm(*, implied_vol=0.25, ...) classmethod factory: half_spread=0.005 (OPTIMISTIC,
+    # UNVALIDATED assumption — NOT from the fills; real deep-ITM spreads are materially wider).
 
 @dataclass
 class ZeroDteConfig:
@@ -321,7 +340,14 @@ class ZeroDteConfig:
     enabled: bool = False
     delta: float = 0.50                     # Option delta (0.50 = ATM)
     opra_costs: OpraCalibratedCosts = field(default_factory=OpraCalibratedCosts)
+    max_holding_minutes: float = 60.0
     contracts_per_trade: int = 1
+    prefer_calls: bool = True               # False raises under linear_delta; allowed under 'bsm'
+    payoff_model: Literal["linear_delta", "bsm"] = "linear_delta"  # B3/B4: 'bsm' = real BSM call/put re-pricing
+    moneyness: float = 1.0                   # B3/B4: BSM strike = moneyness * entry_price (1.0 = ATM)
+    # events_per_minute / bin_seconds (FIND-NEW-01, mutually exclusive): sampling cadence for
+    # the transformer's holding-minutes derivation. target_holding_minutes / entry_window_*_et
+    # are DEAD CODE (serialized but never read; emit DeprecationWarning on non-default).
 ```
 
 ### Validation Rules
@@ -335,6 +361,8 @@ class ZeroDteConfig:
 | `stop_loss_pct` | > 0 if set |
 | `take_profit_pct` | > 0 if set |
 | `fill_price` | "close" or "midpoint" |
+
+> These validators fire, but `stop_loss_pct`, `take_profit_pct`, and `fill_price="midpoint"` are **DEAD CODE** (FIND-058 / FIND-058-EXT): the engine never reads them and each emits a `DeprecationWarning` (scheduled removal 2026-10-31). Use `StopLossTakeProfitPolicy` via the holding-policy path for SL/TP.
 
 ---
 
@@ -478,12 +506,17 @@ class BacktestData:
 Transforms equity backtest results into 0DTE option P&L using IBKR-calibrated costs:
 
 ```python
-transformer = ZeroDtePnLTransformer(ZeroDteConfig(
-    enabled=True, delta=0.50, contracts_per_trade=1,
-    opra_costs=OpraCalibratedCosts(commission_per_contract=0.70, implied_vol=0.40),
-))
+# events_per_minute is a REQUIRED positional arg (FIND-NEW-01 — no silent default; 1.0 for 60s bins)
+transformer = ZeroDtePnLTransformer(
+    ZeroDteConfig(
+        enabled=True, delta=0.50, contracts_per_trade=1,
+        opra_costs=OpraCalibratedCosts(commission_per_contract=0.70, implied_vol=0.40),
+    ),
+    events_per_minute=1.0,
+)
 option_result = transformer.transform(backtest_result)
-# option_result.option_total_return, option_result.option_win_rate, etc.
+# option_result.option_total_return, option_result.option_win_rate,
+# option_result.avg_spread_cost / avg_commission_cost / avg_theta_cost, etc.
 ```
 
 ### VectorizedEngine
@@ -594,7 +627,7 @@ Metrics receive a context dict with:
 | `initial_capital` | Starting capital |
 | `annualization_factor` | For annualization |
 | `trading_days_per_year` | Default: 252 |
-| `periods_per_day` | Default: 1000 |
+| `periods_per_day` | `resolved_periods_per_day` (e.g. 390 at 60s bins; legacy fallback 1000) |
 
 ---
 
@@ -864,11 +897,11 @@ from lobbacktest.reports import plot_equity_curve
 | `spread_bps` | 1.0 | 0.01% |
 | `slippage_bps` | 0.5 | 0.005% |
 | `trading_days_per_year` | 252 | Standard |
-| `periods_per_day` | 1000 | ~1000 sequences/day |
+| `periods_per_day` | None (derived) | #PY-263: None → `resolved_periods_per_day` (23400/bin_seconds; e.g. 390 at 60s); legacy fallback 1000 emits DeprecationWarning |
 
 ---
 
-*Last updated: March 17, 2026 (v0.2.0 — Phase 1-3b redesign: bug fixes, LabelMapping, BacktestContext, SignalManifest, ExperimentRunner)*
+*Last updated: 2026-06-19 (v0.1.0 — Phase 4 B1-B4 engine realism: option_pricing.py BSM valuation + payoff_model bsm + use_realized_spread; deep-ITM cost flagged optimistic/unvalidated 2026-07-05)*
 
 > **Note**: `prices.py` imports feature indices from `hft-contracts`.
 > `NormalizationParams.from_json()` validates the `normalization_applied` boundary

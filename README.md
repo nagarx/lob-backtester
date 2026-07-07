@@ -39,6 +39,13 @@ pip install -e ".[dev]"
 
 ## Quick Start
 
+**Run paths at a glance** — three distinct ways to drive a backtest:
+- **CLI scripts** (`scripts/*.py`) — what the `hft-ops` orchestrator shells out to (its `backtesting` stage runs these via subprocess); the production path.
+- **`ExperimentRunner.from_yaml("configs/*.yaml")`** — the config-driven single-run/sweep path (schema in `CODEBASE.md` §5 "ExperimentRunner YAML Schema"); exercised by this repo's tests, **not** on the `hft-ops` path.
+- **Direct Python API** — programmatic (`Backtester(config).run(data, strategy)`).
+
+> Annualization caveat: the script paths and the `ExperimentRunner` path derive the annualization factor from the sampling cadence (`periods_per_day` / `zero_dte.bin_seconds` → `BacktestConfig.resolved_periods_per_day`) and were fixed **separately** across those paths (#PY-263). Set a cadence explicitly — the legacy fallback emits a `DeprecationWarning`. See the `CODEBASE.md` State-at-HEAD cycle log rather than re-deriving the saga.
+
 **Preferred** — via `hft-ops` orchestrator (single YAML manifest, validated cross-module consistency, ledger tracking):
 
 ```bash
@@ -88,6 +95,18 @@ python scripts/run_regression_backtest.py \
   --signals ../lob-model-trainer/outputs/experiments/e5_60s/signals/test/ \
   --name e5_round7 --exchange XNAS
 ```
+
+**Config-driven (`ExperimentRunner.from_yaml`)** — single-run or one-parameter sweep from a `configs/*.yaml`:
+
+```python
+from lobbacktest.experiment import ExperimentRunner
+
+result = ExperimentRunner.from_yaml("configs/e1_deep_itm.yaml").run()  # raises until a zero_dte cadence is added — see caveat below
+print(result.summary())            # markdown table across runs
+print(result.best_by("TotalReturn"))
+```
+
+The YAML block/key schema, the `strategy.type` / `holding.type` enums, and the (one-parameter-at-a-time, not Cartesian) `sweep` semantic are documented in `CODEBASE.md` §5 "ExperimentRunner YAML Schema"; `configs/e1_deep_itm.yaml` + `configs/e1_atm_comparison.yaml` are `ExperimentRunner`-shaped worked examples (they carry `signals.dir` + a `sweep`), but their `zero_dte` blocks predate FIND-NEW-01 and set no `bin_seconds`/`events_per_minute` cadence — which an enabled 0DTE overlay now requires — so `.run()` raises a `ValueError` until a cadence is added (see `CODEBASE.md` §5).
 
 ---
 
@@ -310,9 +329,18 @@ pytest tests/test_signal_manifest.py -v          # shim + feature_set_ref
 
 ## Documentation
 
-- `CODEBASE.md` — detailed module reference
+**Living references** (current ground truth — keep in sync with the code):
+- `CODEBASE.md` — detailed module + config reference (its "State at HEAD" cycle log is the running changelog)
+- `CLAUDE.md` (this repo) — module structure, design patterns, key constraints, data contract
 - `BACKTEST_INDEX.md` — living backtest ledger (round-by-round results)
-- Root pipeline docs: `CLAUDE.md`, `PIPELINE_ARCHITECTURE.md`, `DOCUMENTATION_INDEX.md`
+- `CONTRIBUTING.md` — contribution/field discipline specific to this repo
+- Root pipeline docs (monorepo root): `CLAUDE.md`, `PIPELINE_ARCHITECTURE.md`, `DOCUMENTATION_INDEX.md`
+
+**Point-in-time audit / design records** (historical — do **not** read as current state; consult the living references above for what the code does now):
+- `VALIDATION_FINDINGS_2026_05_30.md` — full-module re-validation findings (verdict: core SOUND)
+- `VALIDATION_FINDINGS_2026_05_14.md` — 3-wave adversarial audit findings brief (large)
+- `DESIGN_CLUSTER_D1_E_2026_05_14.md` — detailed design record for the Cluster D.1 + E cycle
+- `BACKTESTER_AUDIT_PLAN.md` — the first (2026-03-17) audit plan, **superseded** by the 05-14 findings doc
 
 ---
 

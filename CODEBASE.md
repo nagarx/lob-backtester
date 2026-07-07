@@ -365,6 +365,35 @@ class ZeroDteConfig:
 
 > These validators fire, but `stop_loss_pct`, `take_profit_pct`, and `fill_price="midpoint"` are **DEAD CODE** (FIND-058 / FIND-058-EXT): the engine never reads them and each emits a `DeprecationWarning` (scheduled removal 2026-10-31). Use `StopLossTakeProfitPolicy` via the holding-policy path for SL/TP.
 
+### ExperimentRunner YAML Schema (config-driven orchestration)
+
+`ExperimentRunner.from_yaml(path)` (`experiment.py`) is the config-driven entry point: load a YAML → validate the signal directory → run one or more backtests (optionally a sweep) → register each to `BacktestRegistry`. It is **not** the production path — `hft-ops` shells out to the standalone `scripts/` (see §13 + the "run paths" note in `README.md`); `ExperimentRunner` is exercised by this repo's own tests. The blocks below map onto the §5 dataclasses; **per-field defaults + ranges live in those dataclass tables above** — this section documents block/key STRUCTURE + the type ENUMS only.
+
+| Block | Load-bearing keys (consumed by `ExperimentRunner`) | Notes |
+|---|---|---|
+| `experiment` | `name` | Names the run + registry records (default `unnamed`). `description` is stored for provenance, not consumed. |
+| `signals` | `dir` | Path to the trainer signal directory; loaded via `BacktestData.from_signal_dir(validate=True)`. **Required** — absent/empty crashes at load. |
+| `backtest` | `initial_capital`, `position_size`, `allow_short`, `exchange`, `trading_days_per_year`, `periods_per_day`, nested `zero_dte` | Costs are derived from `exchange` via `CostConfig.for_exchange` — a `costs:` sub-block is accepted but **not** consumed on this path (only `BacktestConfig.from_dict`/`load_yaml` read it). `max_position`/`fill_price`/`stop_loss_pct`/`take_profit_pct`/`min_confidence`/`min_agreement` are accepted-without-warning but inert here (dead/deprecated per §5). |
+| `strategy` | `type` (discriminator) + per-type keys | See enum below. |
+| `holding` | `type` + `hold_events` (+ `stop_loss_bps`/`take_profit_bps` for the SL/TP policy) | See enum below. |
+| `zero_dte` | `enabled`, `delta`, `contracts_per_trade`, exactly one of `bin_seconds`/`events_per_minute`, nested `opra_costs` | The overlay transform fires only on a **top-level** `zero_dte.enabled: true` (the `_run_single` activation gate reads the top-level block); a sampling cadence (`bin_seconds` **or** `events_per_minute`) is then **required** (fail-loud, FIND-NEW-01). The cost/annualization builder *additionally* accepts the block nested under `backtest:` (top-level **and** nested → `ValueError`, #PY-226), and `opra_costs` fields nested **or** at the `zero_dte` top-level (both → `ValueError`). Only the keys listed are threaded from YAML — `payoff_model`/`moneyness`/`prefer_calls`/`max_holding_minutes` take their `ZeroDteConfig` defaults on this path. |
+| `sweep` | `{param_name: [values], …}` | One-parameter-at-a-time (see below). |
+| `output` | `dir`, `save_equity_curve` | Registry output dir (default `outputs/backtests`); `save_equity_curve` gates equity-curve persistence. |
+
+**`strategy.type` enum** (dispatch in `_build_strategy`; unknown → `ValueError` fail-loud):
+- `regression` → `RegressionStrategy` — keys `min_return_bps`, `max_spread_bps`, `primary_horizon_idx`, `cooldown_events`.
+- `readability` → `ReadabilityStrategy` — keys `min_agreement`, `min_confidence`, `max_spread_bps`. (FIND-070: these gate values MUST live under `strategy:`, not `backtest:` — the latter raises a precise migration `ValueError`.)
+- `direction` → `DirectionStrategy` — key `shifted`.
+
+**`holding.type` enum** (dispatch in `_build_holding_policy`; unknown → **silently** falls back to `horizon_aligned`, NOT fail-loud — unlike `strategy.type`):
+- `horizon_aligned` → `HorizonAlignedPolicy(hold_events=…)`.
+- `direction_reversal` → `DirectionReversalPolicy(max_hold_events=…)`.
+- `stop_loss_take_profit` → `StopLossTakeProfitPolicy(max_hold_events=…, stop_loss_bps=…, take_profit_bps=…)`.
+
+**`sweep` semantic** — one-parameter-at-a-time, **NOT** a Cartesian grid: each list-valued key is swept independently over its own values (non-list values skipped), holding the other `strategy` params at their base; total runs = the SUM of the list lengths, one `BacktestRegistry` record per `(param, value)`. `ExperimentResult.sweep_parameter` reports only the FIRST key — the design targets a single swept parameter. For a true multi-axis grid, use the hardcoded-grid `scripts/param_sweep.py` or an `hft-ops` sweep manifest (root `CLAUDE.md` §Running an Experiment).
+
+**Diagnostics (FIND-070, hft-rules §8):** unknown keys under `backtest`/`strategy`/`holding` emit a `RuntimeWarning` (typo defence) but construction proceeds. **Worked examples:** `configs/e1_deep_itm.yaml` + `configs/e1_atm_comparison.yaml` are `ExperimentRunner`-shaped (they carry `signals.dir` + a `sweep`); `configs/nvda_readability_first_{xnas,arcx}.yaml` show the nested-block production shape but are **not** `ExperimentRunner`-runnable (they lack `signals.dir`).
+
 ---
 
 ## 6. Strategies

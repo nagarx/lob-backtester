@@ -4,7 +4,7 @@ Standalone backtesting library for evaluating LOB prediction models trained with
 
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 
-**Version**: 0.1.0 | **Tests**: 666 collected (verify exact pass/skip: `pytest --collect-only -q | tail -1`)
+**Version**: 0.1.0 | **Tests**: run `pytest --collect-only -q | tail -1` for the live collected count (hand-typed counts are not maintained here per hft-rules §11)
 
 > **Pipeline scope (2026-06-02).** This module is part of an **intraday trading research pipeline** — an experiment-first platform for discovering and validating *any* profitable **intraday** trading edge (no overnight positions), across approach classes (microstructure/HFT, scalping, intraday momentum, intraday statistical arbitrage, …) and instruments (equities, futures, same-day options). The pipeline *originated* as a high-frequency NVDA MBO/LOB microstructure system — that origin explains the "HFT" / "LOB" / "MBO" naming here — and that microstructure-direction program is now one (largely-closed) track among many. **Names are historical; the mission is general.** This module's role: the P&L backtester — a generic single-asset linear long/flat/short engine (`VectorizedEngine`) with an optional, separable 0DTE-options overlay (`ZeroDtePnLTransformer`) and IBKR-calibrated costs; reusable for equity/futures intraday directional P&L. For the full mission + approach taxonomy + capability-readiness boundary, see root `CLAUDE.md` §Research Scope & Charter (+ `CROSS_ASSET_OFI_FINDINGS_AND_ISSUES_2026_06_01.md` §9).
 
@@ -251,8 +251,9 @@ lob-backtester/
 │   └── reports/                 # generate_report, comparison_table + plot_* (summary.py + plots.py)
 ├── scripts/                     # 7 runnable scripts (see Quick Start)
 ├── configs/                     # YAML experiment configs
-├── tests/                       # 666 collected (verify pass/skip: pytest --collect-only -q | tail -1)
-└── BACKTEST_INDEX.md            # Living backtest ledger
+├── demos/                       # Research demos — deep_itm_monthly_direction_null_demo.py (FIND-049 deep-ITM direction-null; companion test in tests/test_engine/)
+├── tests/                       # run `pytest --collect-only -q | tail -1` for the live count
+└── BACKTEST_INDEX.md            # Backtest ledger — FROZEN at the Phase-1 boundary (see its banner)
 ```
 
 ---
@@ -276,7 +277,7 @@ lob-backtester/
 | Phase 6 final hygiene: shim DeprecationWarning | Lazy `__getattr__` emits once per symbol | 6 |
 | Phase 7 post-validation I: calendar shim deadline | "version 0.4.0" → 2026-10-31 calendar `_REMOVAL_DATE` | 7 |
 
-See `BACKTEST_INDEX.md` for the living backtest ledger.
+See `BACKTEST_INDEX.md` for the backtest ledger (⚠️ FROZEN at the Phase-1 boundary, last real round R-20 2026-05-19 — current authority is `hft-wiki/FINDINGS_MASTER_REGISTER.md` + the discovery `results/*.json`, per its banner).
 
 ---
 
@@ -297,7 +298,7 @@ See `BACKTEST_INDEX.md` for the living backtest ledger.
 
 ```bash
 cd lob-backtester
-pytest tests/ -v     # 666 collected; 16 skipped (real-data + TWAP gates), rest pass
+pytest tests/ -v     # full suite — real-data + TWAP-gated tests skip; run `pytest --collect-only -q | tail -1` for the live count
 pytest tests/test_engine/test_vectorized.py -v   # engine-only
 pytest tests/test_signal_manifest.py -v          # shim + feature_set_ref
 ```
@@ -331,8 +332,8 @@ pytest tests/test_signal_manifest.py -v          # shim + feature_set_ref
 
 **Living references** (current ground truth — keep in sync with the code):
 - `CODEBASE.md` — detailed module + config reference (its "State at HEAD" cycle log is the running changelog)
-- `CLAUDE.md` (this repo) — module structure, design patterns, key constraints, data contract
-- `BACKTEST_INDEX.md` — living backtest ledger (round-by-round results)
+- `CLAUDE.md` (this repo) — module structure, design patterns, key constraints, data contract (**local-only: gitignored under "Documentation artifacts" — not present in a fresh clone of this repo**)
+- `BACKTEST_INDEX.md` — backtest ledger, Rounds 1–20 (⚠️ **FROZEN at the Phase-1 boundary** per its banner; current authority is `hft-wiki/FINDINGS_MASTER_REGISTER.md`)
 - `CONTRIBUTING.md` — contribution/field discipline specific to this repo
 - Root pipeline docs (monorepo root): `CLAUDE.md`, `PIPELINE_ARCHITECTURE.md`, `DOCUMENTATION_INDEX.md`
 
@@ -344,4 +345,4 @@ pytest tests/test_signal_manifest.py -v          # shim + feature_set_ref
 
 ---
 
-*Last updated: 2026-05-30 (#PY-263 annualization closure: R1 readability-script bin_seconds + G1a self-describing annualization key + G1b ExperimentRunner path)*
+*Last updated: 2026-07-07 (Phase-2 TRUTH doc pass: stale 2026-05-30 stamp fixed — substantive edits had landed 2026-06-27 + 2026-07-07 [`01be279`/`0c96a3d`/`d721139`]; hand-typed test counts → run-command pointers per hft-rules §11; `demos/` added to the module tree; `CLAUDE.md` flagged local-only/gitignored; `BACKTEST_INDEX.md` marked FROZEN at the Phase-1 boundary)*

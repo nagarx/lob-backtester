@@ -9,12 +9,12 @@ This document captures contribution discipline specific to `lob-backtester` that
 - **Module structure + design patterns**: `CLAUDE.md` (this repo)
 - **Architecture + cost-model deep-dive**: `CODEBASE.md` (this repo)
 - **Backtest round reference**: `BACKTEST_INDEX.md` (this repo, Round-N ledger)
-- **Validation findings**: `VALIDATION_FINDINGS_2026_05_14.md` (Cluster D.1+E close-out artifact)
-- **Audit plan**: `BACKTESTER_AUDIT_PLAN.md` (this repo)
+- **Validation findings**: `VALIDATION_FINDINGS_2026_05_30.md` (CANONICAL full-module re-validation — verdict "core SOUND"; carries the deferred-item briefs) + `VALIDATION_FINDINGS_2026_05_14.md` (the prior 3-wave audit / Cluster D.1+E close-out artifact — point-in-time)
+- **Audit plan**: `BACKTESTER_AUDIT_PLAN.md` (this repo — **SUPERSEDED for current state** per its own 2026-05-14 banner; historical record of the first audit)
 - **Cross-pipeline findings**: `../lob-model-trainer/reports/CONSOLIDATED_FINDINGS_2026_05.md`
 - **Pipeline architecture deep-dive**: `../PIPELINE_ARCHITECTURE.md` §12 (~300 LOC backtester section)
 - **IBKR cost-model substance anchor**: `../IBKR-transactions-trades/COST_AUDIT_2026_03.md` (316-fill empirical audit; 43 organic BACKTEST_INDEX mentions empirically verified)
-- **Theoretical backbone**: `../hft-wiki/research/theory/` (19 entries as of 2026-05-27) + `../hft-wiki/research/synthesis/` (4 entries including `hmhp_cascade_architecture` shipped Cycle 14)
+- **Theoretical backbone**: `../hft-wiki/research/theory/` + `../hft-wiki/research/synthesis/` (`ls` the dirs for live entry counts — the hand-typed "19 + 4 entries as of 2026-05-27" had aged badly, per hft-rules §11; `synthesis/` includes `hmhp_cascade_architecture`, shipped Cycle 14)
 - **Wiki consultation playbook**: `../hft-wiki/playbooks/record-backtest-result.md` (Cycle 14 ship)
 
 ## `wiki_consultation:` Discipline (REQUIRED post-Cycle-14)

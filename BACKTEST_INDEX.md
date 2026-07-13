@@ -1260,6 +1260,14 @@ python scripts/run_readability_backtest.py \
 - `--min-agreement 1.0` (default) — synthetic-constant 1.0 from Phase 1 adapter (single-horizon trivially agrees); the gate is a no-op for non-HMHP single-horizon TB.
 - `--zero-dte` (default True; explicit for clarity) — applies BSM theta + OPRA half-spread + IBKR commission per the standard 0DTE option cost model.
 
+### ⚠️ Correction note (appended 2026-07-13 — ground-truth audit AUD-19; PHASE_P_BACKLOG #PY-394 / #PY-388)
+
+The historical numbers in this entry are preserved as published (no rewrite); three defects qualify the option cells:
+
+1. **ATM, not deep-ITM.** All option-mode cells in this entry are an **ATM δ=0.5 linear-delta proxy**. The drafted invocation carried `--deep-itm`, but no such flag exists in `run_readability_backtest.py`'s argparse (it exists only in `run_regression_backtest.py`) and it was stripped from the executed command (see "Notes on invocation" above) — deep-ITM was *intended* but never *executed*. These cells are **INVALID as deep-ITM evidence**.
+2. **Theta cadence bug (pre-FIND-NEW-01).** The overlay's then-silent default `events_per_minute=10.0` on this 60s-bin corpus priced the 30-event hold (= 30 min wall-clock) as **3.0 min of theta** — theta understated ~10× (the "3.0 min hold" cells below are this bug's fossil). An **unpersisted read-only replay** of the same trades at the correct cadence (1.0 evt/min) gives ≈ **−5.06%** option return vs the published −1.26% — MORE negative; **diagnostic-only, NOT sealed**. No verdict flip (REFUTE stands a fortiori). The engine was fixed 2026-05-16 (FIND-NEW-01: `events_per_minute` is now a mandatory constructor argument, no default).
+3. **`deep_itm_1.4bps` gate label is a misnomer.** The H1a gate row's `deep_itm_1.4bps` label (and any other `deep_itm_1.4bps` reference in this entry) names the deep-ITM 1.4 bps cost class, but the executed run was ATM δ=0.5 — the label does not describe the executed cost mode.
+
 ### Verdict: REFUTE (H1 FAILS + H5 PASS)
 
 | Gate | Outcome | Threshold | Result |
@@ -1492,6 +1500,14 @@ python scripts/run_readability_backtest.py \
 - `--deep-itm` STRIPPED (does not exist in `run_readability_backtest.py` argparse).
 - `--min-confidence 0.40` calibrated via Round 17a's P25 ≈ 0.40; reused here for direct cross-architecture comparison. R-19 confidence quantiles (P25=0.398, P50=0.446, P75=0.515) are SIMILAR to Round 17a (P25=0.406, P50=0.469, P75=0.534) — TLOB confidence distribution is slightly tighter at the P25 floor.
 - `--min-agreement 1.0` — synthetic-constant 1.0 from Phase 1 adapter (single-horizon trivially agrees); the gate is a no-op for non-HMHP single-horizon TB.
+
+### ⚠️ Correction note (appended 2026-07-13 — ground-truth audit AUD-19; PHASE_P_BACKLOG #PY-394 / #PY-388)
+
+The historical numbers in this entry are preserved as published (no rewrite); three defects qualify the option cells (same class as Round 17a — see its 2026-07-13 correction note):
+
+1. **ATM, not deep-ITM.** All option-mode cells in this entry are an **ATM δ=0.5 linear-delta proxy** (corroborated by Round 19b's direct read of this run's `result.json` config: delta=0.5 / IV=0.4). The drafted invocation carried `--deep-itm`, but no such flag exists in `run_readability_backtest.py`'s argparse (it exists only in `run_regression_backtest.py`) and it was stripped from the executed command (see "Notes on invocation" above) — deep-ITM was *intended* but never *executed*. These cells are **INVALID as deep-ITM evidence**.
+2. **Theta cadence bug (pre-FIND-NEW-01).** The overlay's then-silent default `events_per_minute=10.0` on this 60s-bin corpus priced the 30-event hold (= 30 min wall-clock) as **3.0 min of theta** — theta understated ~10× (the "3.0 min hold" cells below are this bug's fossil; Round 19b's methodology-asymmetry table documents the same defect). An **unpersisted read-only replay** of the same trades at the correct cadence (1.0 evt/min) gives ≈ **−6.79%** option return vs the published −3.11% — MORE negative; **diagnostic-only, NOT sealed**. No verdict flip (REFUTE-WITH-ARCHITECTURAL-LIFT stands a fortiori on the H1 leg). The engine was fixed 2026-05-16 (FIND-NEW-01: `events_per_minute` is now a mandatory constructor argument, no default).
+3. **`deep_itm_1.4bps` gate label is a misnomer.** The H1a gate row's `deep_itm_1.4bps` label (and any other `deep_itm_1.4bps` reference in this entry) names the deep-ITM 1.4 bps cost class, but the executed run was ATM δ=0.5 — the label does not describe the executed cost mode.
 
 ### Verdict: REFUTE-WITH-ARCHITECTURAL-LIFT (H1 FAILS + H2 PASS materially exceeds R-17a + H5 PASS)
 

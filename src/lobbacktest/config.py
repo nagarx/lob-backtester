@@ -28,6 +28,18 @@ from hft_contracts.atomic_io import atomic_write_binary
 # an inline dict inside `for_exchange()` — drift hazard. Now `for_exchange()`
 # reads this. Derived from mbo-statistical-profiler 233-day NVDA analysis
 # (VWES = Volume-Weighted Effective Spread).
+#
+# KNOWN DEFECT #PY-387 (AUD-18, 2026-07-13) — VWES double-count: these presets
+# load `slippage_bps` with the VWES, which is ALREADY a round-trip-equivalent
+# effective-spread measure (mbo-statistical-profiler `liquidity.rs`:
+# ES = 2*|trade - mid|/mid), yet `compute_cost()` charges it PER LEG alongside
+# the separate per-leg `spread_bps` term — the spread is double-counted. An
+# XNAS round trip therefore pays 2 * (1.0 + 1.97 + 0.30) = 6.54 bps variable
+# cost (ARCX: 2 * 2.35 = 4.70 bps). The correct per-leg convention already
+# exists in-repo as the opt-in B1 realized-spread path (engine/vectorized.py,
+# `use_realized_spread`). Preset redesign pending — see PHASE_P_BACKLOG
+# #PY-387. Values deliberately UNCHANGED in the 2026-07-13 doc-fix pass
+# (no behavior change).
 _EXCHANGE_PRESETS: Dict[str, Dict[str, float]] = {
     "XNAS": {
         "spread_bps": 1.0,
@@ -67,12 +79,22 @@ class CostConfig:
         taker_fee_bps: Taker fee in bps (default: 0.0)
 
     Exchange-calibrated presets (from mbo-statistical-profiler):
-        XNAS: VWES=1.97 bps, spread_bps=1.0, slippage_bps=1.97
-        ARCX: VWES=1.10 bps, spread_bps=1.0, slippage_bps=1.10
+        XNAS: VWES=1.97 bps → spread_bps=1.0, slippage_bps=1.97, taker_fee_bps=0.30
+        ARCX: VWES=1.10 bps → spread_bps=1.0, slippage_bps=1.10, taker_fee_bps=0.25
+
+    PER-LEG semantics: ``total_bps`` (= spread_bps + slippage_bps +
+    taker_fee_bps) is a variable cost charged ONCE PER LEG — the engine calls
+    ``compute_cost()`` at entry AND again at exit (``engine/vectorized.py``)
+    — so a round trip pays ~2x ``total_bps`` (+ 2x ``commission_per_trade``).
+    A previous version of the example below read ``# 2.97 bps round-trip``,
+    which was wrong on both axes: stale arithmetic (1.0 + 1.97, predating
+    ``taker_fee_bps``) AND leg/round-trip confusion (#PY-387 doc fix,
+    2026-07-13). The presets additionally double-count the spread — KNOWN
+    DEFECT #PY-387, see the ``_EXCHANGE_PRESETS`` comment above.
 
     Example:
         >>> costs = CostConfig.for_exchange("XNAS")
-        >>> costs.total_bps  # 2.97 bps round-trip
+        >>> costs.total_bps  # 3.27 bps PER LEG (1.0 + 1.97 + 0.30) → ~6.54 bps round-trip
     """
 
     spread_bps: float = 1.0

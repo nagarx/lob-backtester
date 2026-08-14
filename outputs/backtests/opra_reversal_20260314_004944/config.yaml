@@ -1,0 +1,46 @@
+allow_short: true
+costs:
+  commission_per_trade: 0.0
+  exchange: XNAS
+  maker_rebate_bps: -0.2
+  slippage_bps: 1.97
+  spread_bps: 1.0
+  taker_fee_bps: 0.3
+fill_price: close
+holding_policy:
+  max_hold_events: 60
+  require_gate: false
+  type: direction_reversal
+initial_capital: 100000.0
+max_position: 1.0
+min_agreement: 1.0
+min_confidence: 0.65
+periods_per_day: 1000.0
+position_size: 0.1
+readability:
+  cooldown_events: 0
+  max_spread_bps: 1.05
+  min_agreement: 1.0
+  min_confidence: 0.65
+stop_loss_pct: null
+take_profit_pct: null
+trading_days_per_year: 252.0
+zero_dte:
+  contracts_per_trade: 1
+  delta: 0.5
+  enabled: true
+  entry_window_end_et: '15:30'
+  entry_window_start_et: '14:00'
+  max_holding_minutes: 60.0
+  opra_costs:
+    atm_call_half_spread: 0.015
+    atm_call_premium: 1.88
+    atm_put_half_spread: 0.01
+    atm_put_premium: 1.31
+    commission_per_contract: 0.65
+    exchange_fee_per_contract: 0.02
+    regulatory_fee_per_contract: 0.01
+    theta_constant_bps_per_min: 10.0
+    theta_model: constant_bps
+  prefer_calls: true
+  target_holding_minutes: 15.0

@@ -1,0 +1,124 @@
+{
+  "run_id": "ibkr_reversal_20260314_031738",
+  "name": "ibkr_reversal",
+  "created_at": "2026-03-14T03:17:38.018036",
+  "config": {
+    "initial_capital": 100000.0,
+    "position_size": 0.1,
+    "max_position": 1.0,
+    "costs": {
+      "spread_bps": 1.0,
+      "slippage_bps": 1.97,
+      "commission_per_trade": 0.0,
+      "exchange": "XNAS",
+      "taker_fee_bps": 0.3,
+      "maker_rebate_bps": -0.2
+    },
+    "allow_short": true,
+    "fill_price": "close",
+    "stop_loss_pct": null,
+    "take_profit_pct": null,
+    "trading_days_per_year": 252.0,
+    "periods_per_day": 1000.0,
+    "min_confidence": 0.65,
+    "min_agreement": 1.0,
+    "zero_dte": {
+      "enabled": true,
+      "delta": 0.5,
+      "max_holding_minutes": 60.0,
+      "target_holding_minutes": 15.0,
+      "contracts_per_trade": 1,
+      "prefer_calls": true,
+      "entry_window_start_et": "14:00",
+      "entry_window_end_et": "15:30",
+      "opra_costs": {
+        "atm_call_half_spread": 0.015,
+        "atm_put_half_spread": 0.01,
+        "atm_call_premium": 1.88,
+        "atm_put_premium": 1.31,
+        "commission_per_contract": 0.7,
+        "implied_vol": 0.4,
+        "entry_minutes_before_close": 120.0
+      }
+    },
+    "holding_policy": {
+      "type": "direction_reversal",
+      "max_hold_events": 60,
+      "require_gate": false
+    },
+    "readability": {
+      "min_agreement": 1.0,
+      "min_confidence": 0.65,
+      "max_spread_bps": 1.05,
+      "cooldown_events": 0
+    }
+  },
+  "metrics": {
+    "total_trades": 15903,
+    "total_return": -0.41196015625,
+    "final_equity": 58803.984375,
+    "max_drawdown": 0.412198840288362,
+    "SharpeRatio": -119.54292539398006,
+    "SortinoRatio": -139.98665088037515,
+    "MaxDrawdown": 0.412198840288362,
+    "CalmarRatio": -2.252525794828534,
+    "TotalReturn": -0.4119601562499976,
+    "WinRate": 0.24735915492957747,
+    "ProfitFactor": 0.3562726378440857,
+    "Expectancy": -2.648448944091797
+  },
+  "signal_metadata": {
+    "exported_at": "2026-03-13T22:05:26.915450",
+    "split": "test",
+    "horizons": [
+      10,
+      60,
+      300
+    ],
+    "primary_horizon": 10,
+    "total_samples": 50724,
+    "data_dir": "../data/exports/nvda_xnas_128feat",
+    "predictions_distribution": {
+      "Down": 17964,
+      "Stable": 14320,
+      "Up": 18440
+    },
+    "agreement_distribution": {
+      "full_agreement": 41619,
+      "partial": 9105
+    },
+    "confirmation_percentiles": {
+      "p25": 0.6333380937576294,
+      "p50": 0.645604133605957,
+      "p75": 0.6566318273544312,
+      "p99": 0.6661605834960938
+    },
+    "spread_percentiles_bps": {
+      "p25": 0.5417851805686951,
+      "p50": 0.5540626645088196,
+      "p90": 1.1084016561508179
+    },
+    "directional_rate": 0.7176878795047709
+  },
+  "strategy_metadata": {
+    "holding_policy": "direction_reversal_60",
+    "cooldown_events": 0,
+    "n_entries": 7952,
+    "n_exits": 7951,
+    "n_holds_in_position": 13556,
+    "n_gate_pass": 7952,
+    "n_gate_fail": 21265,
+    "avg_hold_events": 2.7,
+    "trade_rate": 0.15676997082249033,
+    "exit_reasons": {
+      "policy": 7951,
+      "end_of_data": 1
+    }
+  },
+  "option_metrics": {
+    "option_total_return": -0.32044212155044083,
+    "option_final_equity": 67955.78784495592,
+    "option_win_rate": 0.21164486921529174,
+    "avg_theta_cost": 0.11472841022466825
+  }
+}

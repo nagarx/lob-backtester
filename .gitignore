@@ -49,7 +49,20 @@ dmypy.json
 .ipynb_checkpoints/
 
 # Output directories
-outputs/
+outputs/**
+# ↑ PAYLOAD stays ignored. EVIDENCE does not.
+# Measured 2026-08-14 by a preservation sweep, tested BY CONTENT against all 30 git object
+# stores on this machine: every .json/.yaml/.log under here was in NO object store. These are
+# MEASUREMENTS -- once the code moves they cannot be re-derived. Proven, not assumed:
+# lob-backtester's e5_round7_deep_itm.json records -1.93% and the same signals re-run through
+# current code give -3.600%. Arrays (.npy/.pt/.pkl) stay ignored: large and regenerable from a
+# checkpoint. Same error shape as `jobs/` in databento-ingest -- an ignore rule aimed at build
+# output that swallowed the source beside it.
+!outputs/**/
+!outputs/**/*.json
+!outputs/**/*.yaml
+!outputs/**/*.yml
+!outputs/**/*.log
 !outputs/README.md
 results/
 logs/

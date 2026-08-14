@@ -1,0 +1,82 @@
+{
+  "run_id": "E1_deep_itm_tlob_regression_h10_Regression(min_ret>=0.7bps,spread<=1.05,hold=horizon_aligned_10)_20260317_060716",
+  "name": "E1_deep_itm_tlob_regression_h10_Regression(min_ret>=0.7bps,spread<=1.05,hold=horizon_aligned_10)",
+  "created_at": "2026-03-17T06:07:16.816040",
+  "config": {
+    "experiment": {
+      "name": "E1_deep_itm_tlob_regression_h10",
+      "description": "Deep ITM 0DTE (delta=0.95): conviction sweep 0.7-10 bps, H10 hold, fixed engine"
+    },
+    "backtest": {
+      "initial_capital": 100000,
+      "position_size": 0.1,
+      "allow_short": false,
+      "exchange": "XNAS"
+    },
+    "strategy": {
+      "type": "regression",
+      "max_spread_bps": 1.05,
+      "primary_horizon_idx": 0,
+      "min_return_bps": 0.7
+    },
+    "holding": {
+      "type": "horizon_aligned",
+      "hold_events": 10
+    },
+    "zero_dte": {
+      "enabled": true,
+      "delta": 0.95,
+      "commission_per_contract": 0.63
+    }
+  },
+  "metrics": {
+    "TotalReturn": -0.13562125591719887,
+    "AnnualReturn": -0.5152300288009042,
+    "SharpeRatio": -36.272634543122024,
+    "SortinoRatio": -49.60793960028547,
+    "MaxDrawdown": 0.13662859771835784,
+    "CalmarRatio": -3.771026252227108,
+    "WinRate": 0.32492863939105615,
+    "ProfitFactor": 0.3605299626767556,
+    "AverageWin": 11.195106297001493,
+    "AverageLoss": 14.946006478203794,
+    "PayoffRatio": 0.7490366281673737,
+    "Expectancy": -6.452010271988184
+  },
+  "signal_metadata": {
+    "model_type": "tlob_regression",
+    "model_name": "TLOB(layers=2, hidden=32)",
+    "parameters": 693190,
+    "horizon": "H10",
+    "horizon_idx": 0,
+    "total_samples": 50724,
+    "split": "test",
+    "checkpoint": "outputs/experiments/nvda_tlob_128feat_regression_h10/checkpoints/best.pt",
+    "config": "configs/experiments/nvda_tlob_128feat_regression_h10.yaml",
+    "metrics": {
+      "r2": 0.464227,
+      "mae": 2.431319,
+      "rmse": 3.430298,
+      "pearson": 0.681683,
+      "directional_accuracy": 0.749363,
+      "profitable_accuracy": 0.92627,
+      "ic": 0.676591
+    },
+    "prediction_stats": {
+      "mean": 0.0228,
+      "std": 3.0962,
+      "min": -27.69,
+      "max": 32.27
+    },
+    "spread_stats": {
+      "mean": 0.732,
+      "median": 0.5541,
+      "p90": 1.1084
+    }
+  },
+  "strategy_metadata": {},
+  "option_metrics": {
+    "option_total_return": -0.11391327579101107,
+    "option_win_rate": 0.4224548049476689
+  }
+}

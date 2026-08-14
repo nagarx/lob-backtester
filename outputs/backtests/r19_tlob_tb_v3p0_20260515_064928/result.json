@@ -1,0 +1,159 @@
+{
+  "run_id": "r19_tlob_tb_v3p0_20260515_064928",
+  "name": "r19_tlob_tb_v3p0",
+  "created_at": "2026-05-15T06:49:28.193204+00:00",
+  "config": {
+    "initial_capital": 100000.0,
+    "position_size": 0.1,
+    "max_position": 1.0,
+    "costs": {
+      "spread_bps": 1.0,
+      "slippage_bps": 1.97,
+      "commission_per_trade": 0.0,
+      "exchange": "XNAS",
+      "taker_fee_bps": 0.3,
+      "maker_rebate_bps": -0.2
+    },
+    "allow_short": true,
+    "fill_price": "close",
+    "stop_loss_pct": null,
+    "take_profit_pct": null,
+    "trading_days_per_year": 252.0,
+    "periods_per_day": 1000.0,
+    "min_confidence": 0.4,
+    "min_agreement": 1.0,
+    "zero_dte": {
+      "enabled": true,
+      "delta": 0.5,
+      "max_holding_minutes": 60.0,
+      "target_holding_minutes": 15.0,
+      "contracts_per_trade": 1,
+      "prefer_calls": true,
+      "entry_window_start_et": "14:00",
+      "entry_window_end_et": "15:30",
+      "opra_costs": {
+        "atm_call_half_spread": 0.015,
+        "atm_put_half_spread": 0.01,
+        "atm_call_premium": 1.88,
+        "atm_put_premium": 1.31,
+        "commission_per_contract": 0.7,
+        "implied_vol": 0.4,
+        "entry_minutes_before_close": 120.0
+      }
+    },
+    "holding_policy": {
+      "type": "horizon_aligned",
+      "hold_events": 30
+    },
+    "readability": {
+      "min_agreement": 1.0,
+      "min_confidence": 0.4,
+      "max_spread_bps": 1.05,
+      "cooldown_events": 0
+    }
+  },
+  "metrics": {
+    "total_trades": 644,
+    "total_return": -0.03552488438132699,
+    "final_equity": 96447.5115618673,
+    "max_drawdown": 0.0378896620991006,
+    "SharpeRatio": -13.660267954004079,
+    "SortinoRatio": -18.957194390699986,
+    "MaxDrawdown": 0.0378896620991006,
+    "CalmarRatio": -10.717586482611601,
+    "TotalReturn": -0.03549334501371426,
+    "WinRate": 0.391304347826087,
+    "ProfitFactor": 0.5544169661374316,
+    "Expectancy": -11.032572789231919
+  },
+  "signal_metadata": {
+    "agreement_stats": {
+      "full_agreement": 17480,
+      "mean": 1.0,
+      "partial": 0
+    },
+    "checkpoint": "outputs/experiments/r19_tlob_tb_v3p0_h30/signals/checkpoints/best.pt",
+    "compatibility": {
+      "calibration_method": null,
+      "contract_version": "3.0",
+      "data_source": "mbo_lob",
+      "feature_count": 98,
+      "feature_layout": "default",
+      "horizons": [
+        30
+      ],
+      "label_strategy_hash": "826235426554132577874899fbb659888256b8ca95ff8bf52968b0ff8671f2a3",
+      "normalization_strategy": "NormalizationStrategy.HYBRID",
+      "primary_horizon_idx": 0,
+      "schema_version": "3.0",
+      "window_size": 20
+    },
+    "compatibility_fingerprint": "dd21d079228096917c6db63227bc71d2f14534dbebb5a4a939eef19732791eaf",
+    "confirmation_percentiles": {
+      "p25": 0.39834440499544144,
+      "p50": 0.4462646394968033,
+      "p75": 0.5151345282793045,
+      "p99": 0.8189328587055206
+    },
+    "contract_version": "3.0",
+    "data_dir": "../data/exports/nvda_v3p0_tb_pt40_sl20_h30",
+    "data_source": "mbo_lob",
+    "directional_rate": 0.6186498855835241,
+    "exported_at": "2026-05-15T06:49:11.266489+00:00",
+    "horizon_idx": 0,
+    "horizons": [
+      10,
+      20,
+      50,
+      100,
+      200
+    ],
+    "model_config_hash": "2dc7eeef5192db921ed348364fb4c76fbc5e3e917a69929791e016a99ee16a0e",
+    "model_name": "TLOB(layers=4, hidden=40)",
+    "model_type": "tlob",
+    "normalization_strategy": "NormalizationStrategy.HYBRID",
+    "parameters": 130296,
+    "predictions_distribution": {
+      "Down": 4808,
+      "Stable": 6666,
+      "Up": 6006
+    },
+    "price_stats": {
+      "max": 198.27499389648438,
+      "mean": 182.87366014127053,
+      "min": 169.89500427246094
+    },
+    "primary_horizon": "H10",
+    "return_type": "smoothed_return",
+    "schema_version": "3.0",
+    "signal_type": "classification",
+    "split": "test",
+    "spread_stats": {
+      "mean": 1.1742204143130806,
+      "median": 0.5560652613639832,
+      "p90": 2.6571717739105227
+    },
+    "total_samples": 17480
+  },
+  "strategy_metadata": {
+    "holding_policy": "horizon_aligned_30",
+    "cooldown_events": 0,
+    "n_entries": 322,
+    "n_exits": 322,
+    "n_holds_in_position": 9338,
+    "n_gate_pass": 322,
+    "n_gate_fail": 7498,
+    "avg_hold_events": 30.0,
+    "trade_rate": 0.018421052631578946,
+    "exit_reasons": {
+      "policy": 322,
+      "end_of_data": 0
+    }
+  },
+  "option_metrics": {
+    "option_total_return": -0.031123504135481372,
+    "option_final_equity": 96887.64958645187,
+    "option_win_rate": 0.39751552795031053,
+    "avg_theta_cost": 1.2695719986573597
+  }
+}

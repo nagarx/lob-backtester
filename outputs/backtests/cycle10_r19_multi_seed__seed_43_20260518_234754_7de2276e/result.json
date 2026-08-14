@@ -1,0 +1,163 @@
+{
+  "run_id": "cycle10_r19_multi_seed__seed_43_20260518_234754_7de2276e",
+  "name": "cycle10_r19_multi_seed__seed_43",
+  "created_at": "2026-05-18T23:47:54.217168+00:00",
+  "config": {
+    "initial_capital": 100000.0,
+    "position_size": 0.1,
+    "max_position": 1.0,
+    "costs": {
+      "spread_bps": 1.0,
+      "slippage_bps": 1.97,
+      "commission_per_trade": 0.0,
+      "exchange": "XNAS",
+      "taker_fee_bps": 0.3,
+      "maker_rebate_bps": -0.2
+    },
+    "allow_short": true,
+    "fill_price": "close",
+    "stop_loss_pct": null,
+    "take_profit_pct": null,
+    "trading_days_per_year": 252.0,
+    "periods_per_day": 1000.0,
+    "min_confidence": 0.4,
+    "min_agreement": 1.0,
+    "zero_dte": {
+      "enabled": true,
+      "delta": 0.5,
+      "max_holding_minutes": 60.0,
+      "target_holding_minutes": 15.0,
+      "contracts_per_trade": 1,
+      "prefer_calls": true,
+      "entry_window_start_et": "14:00",
+      "entry_window_end_et": "15:30",
+      "opra_costs": {
+        "atm_call_half_spread": 0.015,
+        "atm_put_half_spread": 0.01,
+        "atm_call_premium": 1.88,
+        "atm_put_premium": 1.31,
+        "commission_per_contract": 0.7,
+        "implied_vol": 0.4,
+        "entry_minutes_before_close": 120.0
+      }
+    },
+    "holding_policy": {
+      "type": "horizon_aligned",
+      "hold_events": 10
+    },
+    "readability": {
+      "min_agreement": 1.0,
+      "min_confidence": 0.4,
+      "max_spread_bps": 1.0,
+      "cooldown_events": 0
+    }
+  },
+  "metrics": {
+    "total_trades": 1450,
+    "total_return": -0.0464193886347505,
+    "final_equity": 95358.06113652495,
+    "max_drawdown": 0.0476812738142483,
+    "SharpeRatio": -19.550367563633994,
+    "SortinoRatio": -27.0806848277968,
+    "MaxDrawdown": 0.0476812738142483,
+    "CalmarRatio": -10.398418810387556,
+    "TotalReturn": -0.04638820552906642,
+    "WinRate": 0.40551724137931033,
+    "ProfitFactor": 0.5828374200087452,
+    "Expectancy": -6.402674294448609
+  },
+  "signal_metadata": {
+    "agreement_stats": {
+      "full_agreement": 17480,
+      "mean": 1.0,
+      "partial": 0
+    },
+    "checkpoint": "/Users/knight/code_local/HFT-pipeline-v2/outputs/experiments/seed_43/signals/checkpoints/best.pt",
+    "compatibility": {
+      "calibration_method": null,
+      "contract_version": "3.0",
+      "data_source": "mbo_lob",
+      "feature_count": 98,
+      "feature_layout": "122fe5cbfb657bf91dddeef4e687f7d8d6f120ccd67b7ce57528063bf62e43d2",
+      "horizons": [
+        30
+      ],
+      "label_strategy_hash": "826235426554132577874899fbb659888256b8ca95ff8bf52968b0ff8671f2a3",
+      "normalization_strategy": "NormalizationStrategy.HYBRID",
+      "primary_horizon_idx": 0,
+      "schema_version": "3.0",
+      "window_size": 20
+    },
+    "compatibility_fingerprint": "8f1148de02ad446efdcd613a3c05b00b55439740d48c03101978eaf2a5c2c353",
+    "confirmation_percentiles": {
+      "p25": 0.389232873916626,
+      "p50": 0.45186811685562134,
+      "p75": 0.5218555927276611,
+      "p99": 0.7889453518390656
+    },
+    "contract_version": "3.0",
+    "data_dir": "../data/exports/nvda_v3p0_tb_pt40_sl20_h30",
+    "data_source": "mbo_lob",
+    "directional_rate": 0.6512013729977116,
+    "exported_at": "2026-05-18T23:47:53.426090+00:00",
+    "feature_set_ref": {
+      "content_hash": "122fe5cbfb657bf91dddeef4e687f7d8d6f120ccd67b7ce57528063bf62e43d2",
+      "name": "nvda_r19_tb_v3p0_98feat_v1"
+    },
+    "horizon_idx": 0,
+    "horizons": [
+      10,
+      20,
+      50,
+      100,
+      200
+    ],
+    "model_config_hash": "2dc7eeef5192db921ed348364fb4c76fbc5e3e917a69929791e016a99ee16a0e",
+    "model_name": "TLOB(layers=4, hidden=40)",
+    "model_type": "tlob",
+    "normalization_strategy": "NormalizationStrategy.HYBRID",
+    "parameters": 130296,
+    "predictions_distribution": {
+      "Down": 3091,
+      "Stable": 6097,
+      "Up": 8292
+    },
+    "price_stats": {
+      "max": 198.27499389648438,
+      "mean": 182.87366014127053,
+      "min": 169.89500427246094
+    },
+    "primary_horizon": "H10",
+    "return_type": "smoothed_return",
+    "schema_version": "3.0",
+    "signal_type": "classification",
+    "split": "test",
+    "spread_stats": {
+      "mean": 1.1742204143130806,
+      "median": 0.5560652613639832,
+      "p90": 2.6571717739105227
+    },
+    "total_samples": 17480
+  },
+  "strategy_metadata": {
+    "holding_policy": "horizon_aligned_10",
+    "cooldown_events": 0,
+    "n_entries": 725,
+    "n_exits": 725,
+    "n_holds_in_position": 6525,
+    "n_gate_pass": 725,
+    "n_gate_fail": 9505,
+    "avg_hold_events": 10.0,
+    "trade_rate": 0.041475972540045765,
+    "exit_reasons": {
+      "policy": 725,
+      "end_of_data": 0
+    }
+  },
+  "option_metrics": {
+    "option_total_return": -0.0625842531205113,
+    "option_final_equity": 93741.57468794887,
+    "option_win_rate": 0.36137931034482756,
+    "avg_theta_cost": 4.228164720218691
+  }
+}

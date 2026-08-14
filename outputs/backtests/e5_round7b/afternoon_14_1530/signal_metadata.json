@@ -1,0 +1,54 @@
+{
+  "model_type": "tlob_regression",
+  "model_name": "TLOB(layers=2, hidden=32)",
+  "parameters": 92690,
+  "horizon": "H10",
+  "horizon_idx": 0,
+  "total_samples": 8337,
+  "split": "test",
+  "checkpoint": "outputs/experiments/e5_60s_huber_nocvml/checkpoints/best.pt",
+  "config": "configs/experiments/e5_60s_huber_nocvml.yaml",
+  "metrics": {
+    "r2": 0.123933,
+    "mae": 17.789913,
+    "rmse": 25.652855,
+    "pearson": 0.365193,
+    "directional_accuracy": 0.640336,
+    "profitable_accuracy": 0.663748,
+    "ic": 0.380038
+  },
+  "prediction_stats": {
+    "mean": -0.3209,
+    "std": 7.3516,
+    "min": -11.45,
+    "max": 13.22
+  },
+  "spread_stats": {
+    "mean": 0.6158,
+    "median": 0.5493,
+    "p90": 1.0579
+  },
+  "regime_filter": {
+    "window": "afternoon_14_1530",
+    "total": 8337,
+    "selected": 165,
+    "filter_rate": 0.019791291831594098,
+    "predicted_returns.npy": {
+      "original": 8337,
+      "filtered": 165
+    },
+    "regression_labels.npy": {
+      "original": 8337,
+      "filtered": 165
+    },
+    "spreads.npy": {
+      "original": 8337,
+      "filtered": 165
+    },
+    "prices.npy": {
+      "original": 8337,
+      "filtered": 165
+    }
+  },
+  "n_samples_filtered": 165
+}

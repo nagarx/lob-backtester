@@ -1,0 +1,21 @@
+backtest:
+  allow_short: false
+  exchange: XNAS
+  initial_capital: 100000
+  position_size: 0.1
+experiment:
+  description: 'ATM 0DTE (delta=0.50): same conviction sweep, for comparison with
+    deep ITM'
+  name: E1_atm_comparison_tlob_regression_h10
+holding:
+  hold_events: 10
+  type: horizon_aligned
+strategy:
+  max_spread_bps: 1.05
+  min_return_bps: 5.0
+  primary_horizon_idx: 0
+  type: regression
+zero_dte:
+  commission_per_contract: 0.7
+  delta: 0.5
+  enabled: true

@@ -1,0 +1,197 @@
+{
+  "name": "temporal_ridge_h10",
+  "exchange": "XNAS",
+  "signal_dir": "../lob-model-trainer/outputs/experiments/nvda_temporal_ridge_h10/signals/test",
+  "signal_metadata": {
+    "model_type": "temporal_ridge",
+    "model_name": "TemporalRidge(alpha=1.0, features=53)",
+    "parameters": 54,
+    "total_samples": 50724,
+    "split": "test",
+    "horizon_idx": 0,
+    "feature_config": {
+      "signal_indices": [
+        85,
+        84,
+        86,
+        56,
+        45
+      ],
+      "top_k_signals": 3,
+      "rolling_windows": [
+        5,
+        10,
+        20
+      ],
+      "cross_pairs": [
+        [
+          85,
+          84
+        ],
+        [
+          85,
+          86
+        ],
+        [
+          85,
+          45
+        ],
+        [
+          84,
+          56
+        ],
+        [
+          84,
+          86
+        ],
+        [
+          86,
+          45
+        ]
+      ],
+      "context_indices": [
+        42,
+        45,
+        54,
+        40,
+        95
+      ],
+      "include_regime": true,
+      "include_volatility": true,
+      "include_momentum": true,
+      "vol_windows": [
+        10,
+        5
+      ],
+      "momentum_short": 5,
+      "momentum_long": 20
+    },
+    "metrics": {
+      "r2": 0.324011,
+      "ic": 0.616398,
+      "mae": 2.75076,
+      "rmse": 3.853109,
+      "pearson": 0.60619,
+      "directional_accuracy": 0.722395,
+      "profitable_accuracy": 0.897438
+    }
+  },
+  "holding_policy": "horizon_aligned_10",
+  "zero_dte_enabled": true,
+  "results": [
+    {
+      "label": "deep_itm_0.7bps",
+      "min_return_bps": 0.7,
+      "max_spread_bps": 1.05,
+      "holding_policy": "horizon_aligned_10",
+      "strategy_name": "Regression(min_ret>=0.7bps,spread<=1.05,hold=horizon_aligned_10)",
+      "252.0": -3.7832,
+      "MaxDrawdown": 0.2637,
+      "TotalReturn": -0.263,
+      "WinRate": 0.3987,
+      "ProfitFactor": 0.5586,
+      "Expectancy": -3.3101,
+      "n_entries": 4300,
+      "trade_rate": 0.0848,
+      "avg_hold_events": 0,
+      "option_final_equity": 79165.88,
+      "option_return_pct": -20.83,
+      "option_n_trades": 4301
+    },
+    {
+      "label": "itm_2bps",
+      "min_return_bps": 2.0,
+      "max_spread_bps": 1.05,
+      "holding_policy": "horizon_aligned_10",
+      "strategy_name": "Regression(min_ret>=2.0bps,spread<=1.05,hold=horizon_aligned_10)",
+      "252.0": -4.0663,
+      "MaxDrawdown": 0.2449,
+      "TotalReturn": -0.2443,
+      "WinRate": 0.4043,
+      "ProfitFactor": 0.579,
+      "Expectancy": -3.2196,
+      "n_entries": 4022,
+      "trade_rate": 0.0793,
+      "avg_hold_events": 0,
+      "option_final_equity": 80956.78,
+      "option_return_pct": -19.04,
+      "option_n_trades": 4022
+    },
+    {
+      "label": "itm_3bps",
+      "min_return_bps": 3.0,
+      "max_spread_bps": 1.05,
+      "holding_policy": "horizon_aligned_10",
+      "strategy_name": "Regression(min_ret>=3.0bps,spread<=1.05,hold=horizon_aligned_10)",
+      "252.0": -4.4494,
+      "MaxDrawdown": 0.2232,
+      "TotalReturn": -0.2225,
+      "WinRate": 0.4082,
+      "ProfitFactor": 0.591,
+      "Expectancy": -3.1333,
+      "n_entries": 3699,
+      "trade_rate": 0.0729,
+      "avg_hold_events": 0,
+      "option_final_equity": 82950.88,
+      "option_return_pct": -17.05,
+      "option_n_trades": 3699
+    },
+    {
+      "label": "atm_5bps",
+      "min_return_bps": 5.0,
+      "max_spread_bps": 1.05,
+      "holding_policy": "horizon_aligned_10",
+      "strategy_name": "Regression(min_ret>=5.0bps,spread<=1.05,hold=horizon_aligned_10)",
+      "252.0": -6.2206,
+      "MaxDrawdown": 0.1548,
+      "TotalReturn": -0.1541,
+      "WinRate": 0.4347,
+      "ProfitFactor": 0.6386,
+      "Expectancy": -2.9562,
+      "n_entries": 2580,
+      "trade_rate": 0.0509,
+      "avg_hold_events": 0,
+      "option_final_equity": 88875.58,
+      "option_return_pct": -11.12,
+      "option_n_trades": 2581
+    },
+    {
+      "label": "high_conv_8bps",
+      "min_return_bps": 8.0,
+      "max_spread_bps": 1.05,
+      "holding_policy": "horizon_aligned_10",
+      "strategy_name": "Regression(min_ret>=8.0bps,spread<=1.05,hold=horizon_aligned_10)",
+      "252.0": -12.4414,
+      "MaxDrawdown": 0.0527,
+      "TotalReturn": -0.0526,
+      "WinRate": 0.438,
+      "ProfitFactor": 0.6833,
+      "Expectancy": -3.0207,
+      "n_entries": 847,
+      "trade_rate": 0.0167,
+      "avg_hold_events": 0,
+      "option_final_equity": 96451.35,
+      "option_return_pct": -3.55,
+      "option_n_trades": 847
+    },
+    {
+      "label": "very_high_10bps",
+      "min_return_bps": 10.0,
+      "max_spread_bps": 1.05,
+      "holding_policy": "horizon_aligned_10",
+      "strategy_name": "Regression(min_ret>=10.0bps,spread<=1.05,hold=horizon_aligned_10)",
+      "252.0": -16.6358,
+      "MaxDrawdown": 0.0183,
+      "TotalReturn": -0.0182,
+      "WinRate": 0.4565,
+      "ProfitFactor": 0.7724,
+      "Expectancy": -2.2194,
+      "n_entries": 333,
+      "trade_rate": 0.0066,
+      "avg_hold_events": 0,
+      "option_final_equity": 98861.5,
+      "option_return_pct": -1.14,
+      "option_n_trades": 333
+    }
+  ]
+}

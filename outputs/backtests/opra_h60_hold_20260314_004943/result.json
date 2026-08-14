@@ -1,0 +1,125 @@
+{
+  "run_id": "opra_h60_hold_20260314_004943",
+  "name": "opra_h60_hold",
+  "created_at": "2026-03-14T00:49:43.020605",
+  "config": {
+    "initial_capital": 100000.0,
+    "position_size": 0.1,
+    "max_position": 1.0,
+    "costs": {
+      "spread_bps": 1.0,
+      "slippage_bps": 1.97,
+      "commission_per_trade": 0.0,
+      "exchange": "XNAS",
+      "taker_fee_bps": 0.3,
+      "maker_rebate_bps": -0.2
+    },
+    "allow_short": true,
+    "fill_price": "close",
+    "stop_loss_pct": null,
+    "take_profit_pct": null,
+    "trading_days_per_year": 252.0,
+    "periods_per_day": 1000.0,
+    "min_confidence": 0.65,
+    "min_agreement": 1.0,
+    "zero_dte": {
+      "enabled": true,
+      "delta": 0.5,
+      "max_holding_minutes": 60.0,
+      "target_holding_minutes": 15.0,
+      "contracts_per_trade": 1,
+      "prefer_calls": true,
+      "entry_window_start_et": "14:00",
+      "entry_window_end_et": "15:30",
+      "opra_costs": {
+        "atm_call_half_spread": 0.015,
+        "atm_put_half_spread": 0.01,
+        "atm_call_premium": 1.88,
+        "atm_put_premium": 1.31,
+        "commission_per_contract": 0.65,
+        "exchange_fee_per_contract": 0.02,
+        "regulatory_fee_per_contract": 0.01,
+        "theta_model": "constant_bps",
+        "theta_constant_bps_per_min": 10.0
+      }
+    },
+    "holding_policy": {
+      "type": "horizon_aligned",
+      "hold_events": 60
+    },
+    "readability": {
+      "min_agreement": 1.0,
+      "min_confidence": 0.65,
+      "max_spread_bps": 1.05,
+      "cooldown_events": 0
+    }
+  },
+  "metrics": {
+    "total_trades": 1573,
+    "total_return": -0.036773046875,
+    "final_equity": 96322.6953125,
+    "max_drawdown": 0.03959067106810342,
+    "SharpeRatio": -5.743545937421164,
+    "SortinoRatio": -8.478746146591362,
+    "MaxDrawdown": 0.03959067106810342,
+    "CalmarRatio": -4.289928319443667,
+    "TotalReturn": -0.036773046875005155,
+    "WinRate": 0.4777636594663278,
+    "ProfitFactor": 0.919678270816803,
+    "Expectancy": -1.4644603729248047
+  },
+  "signal_metadata": {
+    "exported_at": "2026-03-13T22:05:26.915450",
+    "split": "test",
+    "horizons": [
+      10,
+      60,
+      300
+    ],
+    "primary_horizon": 10,
+    "total_samples": 50724,
+    "data_dir": "../data/exports/nvda_xnas_128feat",
+    "predictions_distribution": {
+      "Down": 17964,
+      "Stable": 14320,
+      "Up": 18440
+    },
+    "agreement_distribution": {
+      "full_agreement": 41619,
+      "partial": 9105
+    },
+    "confirmation_percentiles": {
+      "p25": 0.6333380937576294,
+      "p50": 0.645604133605957,
+      "p75": 0.6566318273544312,
+      "p99": 0.6661605834960938
+    },
+    "spread_percentiles_bps": {
+      "p25": 0.5417851805686951,
+      "p50": 0.5540626645088196,
+      "p90": 1.1084016561508179
+    },
+    "directional_rate": 0.7176878795047709
+  },
+  "strategy_metadata": {
+    "holding_policy": "horizon_aligned_60",
+    "cooldown_events": 0,
+    "n_entries": 787,
+    "n_exits": 786,
+    "n_holds_in_position": 46383,
+    "n_gate_pass": 787,
+    "n_gate_fail": 2768,
+    "avg_hold_events": 59.9,
+    "trade_rate": 0.015515337907105117,
+    "exit_reasons": {
+      "policy": 786,
+      "end_of_data": 1
+    }
+  },
+  "option_metrics": {
+    "option_total_return": -0.8769477027893067,
+    "option_final_equity": 12305.229721069336,
+    "option_win_rate": 0.017789072426937738,
+    "avg_theta_cost": 109.36126819499111
+  }
+}

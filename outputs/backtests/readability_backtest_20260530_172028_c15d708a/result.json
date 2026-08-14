@@ -1,0 +1,107 @@
+{
+  "run_id": "readability_backtest_20260530_172028_c15d708a",
+  "name": "readability_backtest",
+  "created_at": "2026-05-30T17:20:28.966795+00:00",
+  "config": {
+    "initial_capital": 100000.0,
+    "position_size": 0.1,
+    "max_position": 1.0,
+    "costs": {
+      "spread_bps": 1.0,
+      "slippage_bps": 1.97,
+      "commission_per_trade": 0.0,
+      "exchange": "XNAS",
+      "taker_fee_bps": 0.3,
+      "maker_rebate_bps": -0.2
+    },
+    "allow_short": true,
+    "fill_price": "close",
+    "stop_loss_pct": null,
+    "take_profit_pct": null,
+    "trading_days_per_year": 252.0,
+    "periods_per_day": null,
+    "min_confidence": 0.65,
+    "min_agreement": 1.0,
+    "zero_dte": {
+      "enabled": true,
+      "delta": 0.95,
+      "max_holding_minutes": 60.0,
+      "target_holding_minutes": 15.0,
+      "contracts_per_trade": 1,
+      "prefer_calls": true,
+      "entry_window_start_et": "14:00",
+      "entry_window_end_et": "15:30",
+      "opra_costs": {
+        "atm_call_half_spread": 0.015,
+        "atm_put_half_spread": 0.01,
+        "atm_call_premium": 1.88,
+        "atm_put_premium": 1.31,
+        "commission_per_contract": 0.7,
+        "implied_vol": 0.2,
+        "entry_minutes_before_close": 120.0
+      },
+      "bin_seconds": 60.0
+    },
+    "holding_policy": {
+      "type": "horizon_aligned",
+      "hold_events": 10
+    },
+    "readability": {
+      "min_agreement": 1.0,
+      "min_confidence": 0.65,
+      "max_spread_bps": 1.05,
+      "cooldown_events": 0
+    },
+    "annualization": {
+      "resolved_periods_per_day": 390.0,
+      "annualization_factor": 313.4964114627152,
+      "trading_days_per_year": 252.0
+    }
+  },
+  "metrics": {
+    "total_trades": 0,
+    "total_return": 0.0,
+    "final_equity": 100000.0,
+    "max_drawdown": 0.0,
+    "SharpeRatio": NaN,
+    "SortinoRatio": NaN,
+    "MaxDrawdown": 0.0,
+    "CalmarRatio": NaN,
+    "TotalReturn": 0.0,
+    "WinRate": NaN,
+    "ProfitFactor": NaN,
+    "Expectancy": NaN
+  },
+  "signal_metadata": {
+    "schema_version": "3.0",
+    "contract_version": "3.0",
+    "model_type": "hmhp",
+    "model_name": "HMHP",
+    "parameters": 100,
+    "signal_type": "classification",
+    "split": "test",
+    "total_samples": 100,
+    "checkpoint": "/tmp/mock.pkl",
+    "horizons": [
+      10,
+      60,
+      300
+    ]
+  },
+  "strategy_metadata": {
+    "holding_policy": "horizon_aligned_10",
+    "cooldown_events": 0,
+    "n_entries": 0,
+    "n_exits": 0,
+    "n_holds_in_position": 0,
+    "n_gate_pass": 0,
+    "n_gate_fail": 100,
+    "avg_hold_events": 0.0,
+    "trade_rate": 0.0,
+    "exit_reasons": {
+      "policy": 0,
+      "end_of_data": 0
+    }
+  },
+  "option_metrics": {}
+}

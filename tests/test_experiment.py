@@ -53,6 +53,14 @@ def _make_regression_config(signal_dir: Path, tmp_path: Path) -> dict:
             "description": "Unit test experiment",
         },
         "signals": {"dir": str(signal_dir)},
+        # 2026-08-15: ExperimentRunner now REFUSES to publish a P&L that ran
+        # without day boundaries, because a position held across a session
+        # boundary books the overnight gap (median 133 bps, max 620 bps on the
+        # v3p0 test split) against a ~1.4-7 bps decision threshold. These
+        # fixtures are synthetic flat arrays with no day structure at all, so
+        # they take the DELIBERATE, RECORDED override — which is also the only
+        # place the waiver path itself gets exercised.
+        "allow_unenforced_charter": True,
         "backtest": {
             "initial_capital": 10_000,
             "position_size": 0.1,
@@ -232,7 +240,9 @@ class TestZeroDteConfigBuildPY226:
             },
         }
         runner = ExperimentRunner(config)
-        with pytest.raises(ValueError, match="commission_per_contract.*BOTH.*top-level.*opra_costs"):
+        with pytest.raises(
+            ValueError, match="commission_per_contract.*BOTH.*top-level.*opra_costs"
+        ):
             runner._build_zero_dte_config()
 
     def test_zero_dte_neither_location_defaults(self, tmp_path: Path):
@@ -398,7 +408,7 @@ class TestHf1ModeAwareIvDefault:
             "delta": 0.95,
             "opra_costs": {
                 "implied_vol": 0.40,  # explicit ATM-IV on Deep ITM
-                                       # (sensitivity-sweep use case)
+                # (sensitivity-sweep use case)
             },
         }
         runner = ExperimentRunner(config)

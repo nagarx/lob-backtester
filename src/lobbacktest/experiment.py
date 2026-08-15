@@ -402,6 +402,55 @@ class ExperimentRunner:
         engine = VectorizedEngine(backtest_cfg)
         result = engine.run(data, strategy)
 
+        # ------------------------------------------------------------------ #
+        # CHARTER GATE — a REPORTED P&L may not silently be charter-unenforced #
+        # ------------------------------------------------------------------ #
+        # The programme's one hard portfolio constraint is that every position
+        # opens AND closes inside the same RTH session. The engine enforces it
+        # when `data.day_boundaries` is supplied and honestly reports
+        # SessionCharterEnforced=0.0 when it is not — but a 0.0 in a metrics dict
+        # is read by nobody, and the number it accompanies is then trusted.
+        #
+        # WHY THIS IS A HARD FAILURE AND NOT A WARNING. Measured on the 33-day
+        # v3p0 test split, the 32 overnight gaps have a MEDIAN of 133 bps and a
+        # MAX of 620 bps, against a decision threshold of roughly 1.4-7 bps. One
+        # position left open across one boundary therefore moves the result by
+        # 19x to 443x the entire threshold — a single trade can manufacture or
+        # destroy an apparent edge. That is a deterministic identity violation
+        # (the run did not test the strategy the charter defines), not a
+        # judgement call, so it fails loud per hft-rules §8.
+        #
+        # THE GATE IS HERE, NOT IN THE ENGINE, ON PURPOSE. `run_from_arrays` is a
+        # public entry point used by discovery harnesses that pass a single day's
+        # array and have no day structure at all; failing there would raise 57
+        # false alarms and teach people to bypass the guard. The hazard is a
+        # PUBLISHED result, so the gate sits where results are published.
+        #
+        # The waiver is explicit and RECORDED, matching the codebase's
+        # `DataConfig.allow_partial_export` precedent: taking it is visible in
+        # the artifact, so a reader can see the run was unenforced BY CHOICE
+        # rather than by accident.
+        enforced = float(result.metrics.get("SessionCharterEnforced", 0.0) or 0.0)
+        waived = bool(self.config.get("allow_unenforced_charter", False))
+        if enforced < 1.0 and not waived:
+            raise ValueError(
+                "CHARTER NOT ENFORCED: this backtest ran without day boundaries, so a "
+                "position could be held across a session boundary and book the overnight "
+                "gap as intraday P&L. Measured on the v3p0 test split, those gaps run to "
+                "620 bps against a ~1.4-7 bps decision threshold, so the reported return "
+                "is not a test of an intraday strategy.\n"
+                "  FIX: supply `day_boundaries` on the BacktestData. As of 2026-08-15 the "
+                "signal export does not carry a day/session key (37 distinct keys across "
+                "19 real signal_metadata.json, none of them a date), so this requires the "
+                "signal exporter to emit one — the identity is known at export time and "
+                "discarded at the persist boundary (hft-rules §1).\n"
+                "  DELIBERATE OVERRIDE: set `allow_unenforced_charter: true` in the "
+                "experiment config. It is recorded on the result so the run is visibly "
+                "un-charter-tested by choice."
+            )
+        if waived:
+            result.metrics["SessionCharterWaived"] = 1.0
+
         # Optional: 0DTE transform
         zero_dte_config = self.config.get("zero_dte", {})
         option_metrics = {}

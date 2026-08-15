@@ -54,6 +54,11 @@ class BacktestData:
         spreads: Bid-ask spread in bps (shape: N)
         agreement_ratio: HMHP cross-horizon agreement (shape: N), in [0.333, 1.0]
         confirmation_score: HMHP decoder confidence (shape: N), in [0, 0.667]
+        day_boundaries: Optional [(start_idx, end_idx), ...] half-open row ranges,
+            one per trading day, in the coordinates of ``prices``. Supplying this
+            ARMS the no-overnight charter (see ``VectorizedEngine.run``). Absent
+            (the default), the charter is NOT enforced and positions carry across
+            day edges exactly as they did before 2026-08-15.
     """
 
     prices: np.ndarray
@@ -65,6 +70,7 @@ class BacktestData:
     confirmation_score: Optional[np.ndarray] = None
     predicted_returns: Optional[np.ndarray] = None
     regression_labels: Optional[np.ndarray] = None
+    day_boundaries: Optional[List[Tuple[int, int]]] = None
 
     def __post_init__(self) -> None:
         """Validate data."""
@@ -76,6 +82,55 @@ class BacktestData:
             raise ValueError("prices contains NaN or Inf values")
         if np.any(self.prices <= 0):
             raise ValueError("prices must be positive")
+        self._validate_day_boundaries()
+
+    def _validate_day_boundaries(self) -> None:
+        """Fail loud on a day_boundaries list that does not partition ``prices``.
+
+        The charter fix (2026-08-15) derives session edges from this list. A list
+        that does not exactly tile ``[0, len(prices))`` would silently mis-place
+        those edges — the same *positional-coordinate* failure mode that let a
+        multi-source join fabricate IC +1.0000 on 162/162 days. Row identity is a
+        deterministic contract, so a violation raises rather than warns
+        (hft-rules §8).
+        """
+        if self.day_boundaries is None:
+            return
+
+        n = len(self.prices)
+        if len(self.day_boundaries) == 0:
+            raise ValueError(
+                "day_boundaries is an empty list. Pass None to run without "
+                "charter enforcement; an empty list is ambiguous."
+            )
+
+        cursor = 0
+        for day_i, bounds in enumerate(self.day_boundaries):
+            if len(bounds) != 2:
+                raise ValueError(
+                    f"day_boundaries[{day_i}] must be a (start_idx, end_idx) pair, got {bounds!r}"
+                )
+            start, end = int(bounds[0]), int(bounds[1])
+            if start != cursor:
+                raise ValueError(
+                    f"day_boundaries must tile [0, {n}) contiguously: "
+                    f"day {day_i} starts at {start}, expected {cursor}. "
+                    f"Gaps/overlaps mean the row coordinates do not describe "
+                    f"this price array."
+                )
+            if end <= start:
+                raise ValueError(
+                    f"day_boundaries[{day_i}] = ({start}, {end}) is empty or "
+                    f"reversed; every day must contain at least one row."
+                )
+            cursor = end
+
+        if cursor != n:
+            raise ValueError(
+                f"day_boundaries cover {cursor} rows but prices has {n}. "
+                f"The boundaries were computed against a different array — "
+                f"do not guess an alignment, re-derive them from the loader."
+            )
 
     def __len__(self) -> int:
         return len(self.prices)
@@ -161,11 +216,27 @@ class BacktestData:
                 print(f"  ⚠️  Signal validation: {w}")
 
         prices = np.load(d / "prices.npy", allow_pickle=False)
-        labels = np.load(d / "labels.npy", allow_pickle=False) if (d / "labels.npy").exists() else None
-        predictions = np.load(d / "predictions.npy", allow_pickle=False) if (d / "predictions.npy").exists() else None
-        spreads = np.load(d / "spreads.npy", allow_pickle=False) if (d / "spreads.npy").exists() else None
-        agreement = np.load(d / "agreement_ratio.npy", allow_pickle=False) if (d / "agreement_ratio.npy").exists() else None
-        confirmation = np.load(d / "confirmation_score.npy", allow_pickle=False) if (d / "confirmation_score.npy").exists() else None
+        labels = (
+            np.load(d / "labels.npy", allow_pickle=False) if (d / "labels.npy").exists() else None
+        )
+        predictions = (
+            np.load(d / "predictions.npy", allow_pickle=False)
+            if (d / "predictions.npy").exists()
+            else None
+        )
+        spreads = (
+            np.load(d / "spreads.npy", allow_pickle=False) if (d / "spreads.npy").exists() else None
+        )
+        agreement = (
+            np.load(d / "agreement_ratio.npy", allow_pickle=False)
+            if (d / "agreement_ratio.npy").exists()
+            else None
+        )
+        confirmation = (
+            np.load(d / "confirmation_score.npy", allow_pickle=False)
+            if (d / "confirmation_score.npy").exists()
+            else None
+        )
 
         # Phase II D10 fix (2026-04-20): calibration precedence is MANIFEST-DRIVEN, not
         # file-existence-driven. The OLD pattern silently preferred calibrated_returns.npy
@@ -180,9 +251,7 @@ class BacktestData:
         # Legacy path (validate=False OR pre-Phase-II manifest without
         # calibration_method): fall back to file-existence semantics for
         # back-compat with R1-R8 ledger signal directories.
-        manifest_says_calibrated = (
-            manifest is not None and manifest.calibration_method is not None
-        )
+        manifest_says_calibrated = manifest is not None and manifest.calibration_method is not None
         if manifest_says_calibrated and (d / "calibrated_returns.npy").exists():
             predicted_returns = np.load(d / "calibrated_returns.npy", allow_pickle=False)
         elif manifest is not None and manifest.calibration_method is None:
@@ -200,7 +269,11 @@ class BacktestData:
                 predicted_returns = np.load(d / "predicted_returns.npy", allow_pickle=False)
             else:
                 predicted_returns = None
-        regression_labels = np.load(d / "regression_labels.npy", allow_pickle=False) if (d / "regression_labels.npy").exists() else None
+        regression_labels = (
+            np.load(d / "regression_labels.npy", allow_pickle=False)
+            if (d / "regression_labels.npy").exists()
+            else None
+        )
 
         return cls(
             prices=prices,
@@ -249,16 +322,64 @@ class VectorizedEngine:
         """
         Run the backtest.
 
+        NO-OVERNIGHT CHARTER (2026-08-15). The programme's one hard portfolio
+        constraint is that every position opens AND closes inside the same RTH
+        session. Until this date NO code enforced it: ``loader.py`` built
+        ``day_boundaries`` and nothing read it, the loader concatenated every day
+        into one continuous price array, and this loop iterated it with no
+        day-edge reset — so a position opened near a day's end carried into the
+        next day and booked the OVERNIGHT GAP, the largest return term in the
+        series, as intraday P&L. The only bound on a hold was
+        ``ZeroDteConfig.max_holding_minutes`` (a config default of 60.0); at 60s
+        bars (~390 bars/day) that put ~15.4% of every day within max-hold range
+        of a boundary.
+
+        When ``data.day_boundaries`` is supplied, any position still open at the
+        LAST row of a day is force-closed at that row's price, through the same
+        exit path, cost model and trade-recording as any other exit
+        (``_record_close``). Two observability outputs, both on the result:
+
+          * ``metrics["SessionForcedCloses"]`` — how many exits were
+            charter-driven rather than signal-driven.
+          * ``metrics["SessionCharterEnforced"]`` — 1.0 when boundaries were
+            supplied, 0.0 when they were not. An unenforced run must never be
+            silently indistinguishable from a compliant one.
+
+        A post-run check then re-derives every round trip's entry and exit day
+        and raises if any trade spans a boundary. That is a deterministic
+        identity violation, so it fails rather than warns (hft-rules §8).
+
+        When ``data.day_boundaries`` is None the charter is NOT enforced and
+        behaviour is byte-identical to the pre-2026-08-15 engine. Discovery
+        harnesses that pass bare arrays with no day structure land here.
+
         Args:
-            data: Price and label data
+            data: Price and label data. ``data.day_boundaries``, if present,
+                arms the charter (see above).
             strategy: Trading strategy
             metrics: Optional list of metrics to compute
 
         Returns:
             BacktestResult with complete backtest output
+
+        Raises:
+            ValueError: If a recorded round trip spans a day boundary despite
+                enforcement (an engine-invariant violation, not a user error).
         """
         n = len(data)
         prices = data.prices
+
+        # Charter: last row of each day, excluding the final day. The final
+        # day's tail is already handled by the pre-existing end-of-data close
+        # below, so including it here would double-count and would silence that
+        # path's WARN. Excluding it keeps SessionForcedCloses meaning exactly
+        # "closes that would NOT have happened before this fix".
+        day_boundaries = data.day_boundaries
+        charter_enforced = day_boundaries is not None
+        session_close_rows: set = set()
+        if day_boundaries is not None:
+            session_close_rows = {end - 1 for _, end in day_boundaries[:-1]}
+        n_forced_session_closes = 0
         # B1 (2026-06-19): reset the once-per-run guard for the realized-spread
         # fallback WARN (set by _realized_spread_bps on NaN/missing per-row spread).
         self._spread_warn_emitted = False
@@ -309,21 +430,14 @@ class VectorizedEngine:
             if signal == Signal.BUY:
                 if current_position.is_short:
                     # Close short position first
-                    cash_flow, cost, pnl = self._close_position(
-                        current_position, price,
+                    cash, _ = self._record_close(
+                        current_position,
+                        price,
+                        i,
+                        cash,
+                        trades,
+                        trade_pnls,
                         spread_bps_override=self._realized_spread_bps(data, i),
-                    )
-                    cash += cash_flow - cost
-                    # P2 FIX: Include BOTH entry and exit costs in trade_pnls
-                    trade_pnls.append(pnl - cost - current_position.entry_cost)
-                    trades.append(
-                        Trade(
-                            index=i,
-                            side=TradeSide.FLAT,
-                            price=price,
-                            size=current_position.size,
-                            cost=cost,
-                        )
                     )
                     current_position = Position.flat()
 
@@ -337,7 +451,7 @@ class VectorizedEngine:
                         )
                         # Deduct BOTH position value AND cost from cash
                         # (we're "buying" shares, so cash decreases)
-                        cash -= (position_value + cost)
+                        cash -= position_value + cost
                         current_position = Position(
                             side=PositionSide.LONG,
                             size=size,
@@ -362,21 +476,14 @@ class VectorizedEngine:
                 else:
                     if current_position.is_long:
                         # Close long position first
-                        cash_flow, cost, pnl = self._close_position(
-                            current_position, price,
+                        cash, _ = self._record_close(
+                            current_position,
+                            price,
+                            i,
+                            cash,
+                            trades,
+                            trade_pnls,
                             spread_bps_override=self._realized_spread_bps(data, i),
-                        )
-                        cash += cash_flow - cost
-                        # P2 FIX: Include BOTH entry and exit costs in trade_pnls
-                        trade_pnls.append(pnl - cost - current_position.entry_cost)
-                        trades.append(
-                            Trade(
-                                index=i,
-                                side=TradeSide.FLAT,
-                                price=price,
-                                size=current_position.size,
-                                cost=cost,
-                            )
                         )
                         current_position = Position.flat()
 
@@ -391,7 +498,7 @@ class VectorizedEngine:
                                 position_value, spread_bps=self._realized_spread_bps(data, i)
                             )
                             # C3 FIX: Deduct position_value as margin + cost (same as longs)
-                            cash -= (position_value + cost)
+                            cash -= position_value + cost
                             current_position = Position(
                                 side=PositionSide.SHORT,
                                 size=size,
@@ -411,23 +518,45 @@ class VectorizedEngine:
 
             elif signal == Signal.EXIT:
                 if not current_position.is_flat:
-                    cash_flow, cost, pnl = self._close_position(
-                        current_position, price,
+                    cash, _ = self._record_close(
+                        current_position,
+                        price,
+                        i,
+                        cash,
+                        trades,
+                        trade_pnls,
                         spread_bps_override=self._realized_spread_bps(data, i),
                     )
-                    cash += cash_flow - cost
-                    # P2 FIX: Include BOTH entry and exit costs in trade_pnls
-                    trade_pnls.append(pnl - cost - current_position.entry_cost)
-                    trades.append(
-                        Trade(
-                            index=i,
-                            side=TradeSide.FLAT,
-                            price=price,
-                            size=current_position.size,
-                            cost=cost,
-                        )
-                    )
                     current_position = Position.flat()
+
+            # NO-OVERNIGHT CHARTER: force-close at the last row of the day.
+            # Placed AFTER signal processing so a signal-driven exit on this same
+            # row takes precedence and is never double-counted, and BEFORE the
+            # equity update so equity[i] marks the day flat. Uses the same
+            # _record_close exit path, cost model and Trade(FLAT) recording as
+            # every other exit — there is no second exit path.
+            if i in session_close_rows and not current_position.is_flat:
+                cash, forced_cost = self._record_close(
+                    current_position,
+                    price,
+                    i,
+                    cash,
+                    trades,
+                    trade_pnls,
+                    spread_bps_override=self._realized_spread_bps(data, i),
+                )
+                logger.info(
+                    "Charter force-close at session end: row=%d, size=%g, "
+                    "price=%.4f, cost=%.4f. Position was still open at the last "
+                    "row of its day; the no-overnight charter forbids carrying "
+                    "it across the boundary.",
+                    i,
+                    current_position.size,
+                    price,
+                    forced_cost,
+                )
+                current_position = Position.flat()
+                n_forced_session_closes += 1
 
             # Update equity: cash + position value
             # For long: equity = cash + current_market_value
@@ -454,25 +583,20 @@ class VectorizedEngine:
         # Close any remaining position at end
         if not current_position.is_flat:
             final_price = prices[-1]
-            cash_flow, cost, pnl = self._close_position(
-                current_position, final_price,
-                spread_bps_override=self._realized_spread_bps(data, n - 1),
-            )
-            cash += cash_flow - cost
             # FIND-001 fix (2026-05-14): emit Trade(side=FLAT) atomically with trade_pnls.append.
             # Pre-fix: only trade_pnls.append fired; zero_dte.py silent break masked the orphan.
             # See DESIGN_CLUSTER_D1_E_2026_05_14.md §3.1 + VALIDATION_FINDINGS_2026_05_14.md FIND-001.
-            trades.append(
-                Trade(
-                    index=n - 1,
-                    side=TradeSide.FLAT,
-                    price=final_price,
-                    size=current_position.size,
-                    cost=cost,
-                )
+            # 2026-08-15: routed through _record_close (the single exit path)
+            # rather than an inline copy. Arithmetic is unchanged.
+            cash, cost = self._record_close(
+                current_position,
+                final_price,
+                n - 1,
+                cash,
+                trades,
+                trade_pnls,
+                spread_bps_override=self._realized_spread_bps(data, n - 1),
             )
-            # P2 FIX: Include entry cost in trade_pnls
-            trade_pnls.append(pnl - cost - current_position.entry_cost)
             equity[-1] = cash
             # hft-rules §8 observability — auto-close should not be silent
             logger.warning(
@@ -500,6 +624,18 @@ class VectorizedEngine:
             metrics=metrics,
         )
 
+        # Charter observability. Injected AFTER _compute_metrics so these two
+        # keys are present on every run regardless of the `metrics` list the
+        # caller passed (scripts/run_spread_signal_backtest.py passes
+        # metrics=[]). A silent behaviour change is exactly what this programme
+        # keeps being bitten by: a reader must be able to see both how many
+        # exits were charter-driven AND whether the charter ran at all.
+        computed_metrics["SessionForcedCloses"] = float(n_forced_session_closes)
+        computed_metrics["SessionCharterEnforced"] = 1.0 if charter_enforced else 0.0
+
+        # Deterministic identity check: no round trip may span a day boundary.
+        self._assert_no_trade_spans_session(trades, day_boundaries)
+
         return BacktestResult(
             equity_curve=equity,
             returns=returns,
@@ -517,6 +653,142 @@ class VectorizedEngine:
             start_index=0,
             end_index=n - 1,
         )
+
+    def _record_close(
+        self,
+        position: Position,
+        price: float,
+        index: int,
+        cash: float,
+        trades: List[Trade],
+        trade_pnls: List[float],
+        *,
+        spread_bps_override: Optional[float] = None,
+    ) -> Tuple[float, float]:
+        """Close ``position`` and record it — THE single exit path.
+
+        Extracted 2026-08-15 so the no-overnight force-close cannot drift from
+        signal-driven exits. Every exit in this engine (BUY-reverses-short,
+        SELL-reverses-long, EXIT, end-of-data, session force-close) routes here,
+        so all five share one cost model, one P&L convention and one
+        ``Trade(FLAT)`` emission. The arithmetic is byte-identical to the five
+        inline copies it replaced.
+
+        P2 FIX (2026-03-17) preserved: ``trade_pnls`` carries BOTH the entry and
+        the exit cost. FIND-001 (2026-05-14) preserved: the ``Trade(FLAT)`` is
+        emitted atomically with the ``trade_pnls`` append, so the round-trip
+        pairing invariant in ``BacktestResult.__post_init__`` cannot be violated
+        by a caller forgetting one of the two.
+
+        Args:
+            position: The open position to close (must not be FLAT).
+            price: Execution price for the close.
+            index: Row index the close is recorded at.
+            cash: Cash before the close.
+            trades: Trade list, appended in place.
+            trade_pnls: Round-trip P&L list, appended in place.
+            spread_bps_override: Per-leg realized half-spread, or None for the
+                configured flat ``spread_bps``.
+
+        Returns:
+            ``(cash_after, cost)`` — cash after settlement, and the exit-leg
+            transaction cost (returned so callers can log it).
+        """
+        cash_flow, cost, pnl = self._close_position(
+            position, price, spread_bps_override=spread_bps_override
+        )
+        cash += cash_flow - cost
+        # P2 FIX: Include BOTH entry and exit costs in trade_pnls
+        trade_pnls.append(pnl - cost - position.entry_cost)
+        trades.append(
+            Trade(
+                index=index,
+                side=TradeSide.FLAT,
+                price=price,
+                size=position.size,
+                cost=cost,
+            )
+        )
+        return cash, cost
+
+    def _assert_no_trade_spans_session(
+        self,
+        trades: List[Trade],
+        day_boundaries: Optional[List[Tuple[int, int]]],
+    ) -> None:
+        """Fail loud if any recorded round trip crosses a day boundary.
+
+        The charter is enforced by the force-close inside the position loop;
+        this re-derives the answer independently from the emitted trade record
+        and raises on disagreement. It exists because the programme's recurring
+        failure mode is deriving an identity and then never checking it — the
+        force-close alone would be an assumption, and an assumption is what let
+        ``day_boundaries`` sit unread in ``loader.py`` for the whole life of the
+        module.
+
+        No-op when ``day_boundaries`` is None (charter not armed).
+
+        Args:
+            trades: The emitted trade list, in ``[open, close, open, close, …]``
+                alternation order (the same contract ``ZeroDtePnLTransformer``
+                relies on).
+            day_boundaries: Validated half-open per-day row ranges, or None.
+
+        Raises:
+            ValueError: On a spanning round trip, or on a trade list that does
+                not alternate (which would make the span check meaningless).
+        """
+        if day_boundaries is None or not trades:
+            return
+
+        # day_of(row) via the day start offsets: searchsorted is O(log D) and
+        # needs no per-row map even at 233 days x ~390 bars.
+        day_starts = np.array([start for start, _ in day_boundaries], dtype=np.int64)
+
+        def day_of(row: int) -> int:
+            return int(np.searchsorted(day_starts, row, side="right") - 1)
+
+        open_trade: Optional[Trade] = None
+        for position_in_list, trade in enumerate(trades):
+            if trade.side == TradeSide.FLAT:
+                if open_trade is None:
+                    raise ValueError(
+                        f"Charter check cannot run: trades[{position_in_list}] "
+                        f"is a FLAT close with no preceding open. The engine "
+                        f"emits strict open/close alternation; a violation here "
+                        f"means the trade record itself is corrupt."
+                    )
+                entry_day = day_of(open_trade.index)
+                exit_day = day_of(trade.index)
+                if entry_day != exit_day:
+                    raise ValueError(
+                        f"NO-OVERNIGHT CHARTER VIOLATION: round trip entered at "
+                        f"row {open_trade.index} (day index {entry_day}, rows "
+                        f"{day_boundaries[entry_day]}) and exited at row "
+                        f"{trade.index} (day index {exit_day}, rows "
+                        f"{day_boundaries[exit_day]}). The position spanned "
+                        f"{exit_day - entry_day} day boundary/boundaries and "
+                        f"would have booked the overnight gap as intraday P&L. "
+                        f"This is an engine invariant, not a config choice — the "
+                        f"session force-close should have prevented it."
+                    )
+                open_trade = None
+            else:
+                if open_trade is not None:
+                    raise ValueError(
+                        f"Charter check cannot run: trades[{position_in_list}] "
+                        f"opens while trades[?] at row {open_trade.index} is "
+                        f"still open. The engine holds one position at a time "
+                        f"and emits strict open/close alternation."
+                    )
+                open_trade = trade
+
+        if open_trade is not None:
+            raise ValueError(
+                f"Charter check cannot run: the trade record ends with an "
+                f"unclosed open at row {open_trade.index}. The end-of-data "
+                f"close should have emitted its Trade(FLAT). See FIND-001."
+            )
 
     def _compute_position_size(self, capital: float, price: float) -> float:
         """
@@ -594,7 +866,9 @@ class VectorizedEngine:
                 logger.warning(
                     "use_realized_spread=True but a per-row spread is non-finite/"
                     "negative (spread[%d]=%s); falling back to flat spread_bps for "
-                    "affected bars.", i, s,
+                    "affected bars.",
+                    i,
+                    s,
                 )
                 self._spread_warn_emitted = True
             return None
@@ -614,7 +888,7 @@ class VectorizedEngine:
             - We sell shares at current price
             - Proceeds = price * size (the full value we receive)
             - P&L = (price - entry_price) * size
-            
+
         For SHORT positions:
             - We buy back shares at current price to close
             - P&L = (entry_price - price) * size
@@ -632,9 +906,7 @@ class VectorizedEngine:
         if position.is_flat:
             return 0.0, 0.0, 0.0
 
-        cost = self.config.costs.compute_cost(
-            position.size * price, spread_bps=spread_bps_override
-        )
+        cost = self.config.costs.compute_cost(position.size * price, spread_bps=spread_bps_override)
 
         if position.is_long:
             # Selling shares: receive full proceeds (return position_value + P&L)
@@ -730,10 +1002,12 @@ class VectorizedEngine:
 
             # Add prediction metrics if labels available
             if labels is not None:
-                metrics.extend([
-                    DirectionalAccuracy(),
-                    SignalRate(),
-                ])
+                metrics.extend(
+                    [
+                        DirectionalAccuracy(),
+                        SignalRate(),
+                    ]
+                )
 
         # Compute all metrics
         result = {}
@@ -795,9 +1069,26 @@ class Backtester:
         labels: Optional[np.ndarray] = None,
         shifted: bool = False,
         metrics: Optional[List[Metric]] = None,
+        day_boundaries: Optional[List[Tuple[int, int]]] = None,
     ) -> BacktestResult:
         """
         Convenience method to run backtest from numpy arrays.
+
+        NO-OVERNIGHT CHARTER — OPT-IN HERE, AND OFF BY DEFAULT. This is the
+        public bare-array entry point used by discovery harnesses that have no
+        day structure to give, so ``day_boundaries`` defaults to None and the
+        charter is NOT enforced: positions carry across whatever row edges exist
+        in ``prices``, exactly as before 2026-08-15. That is the correct
+        behaviour for a caller with a single continuous series, and it is a
+        silent-correctness hazard for a caller who concatenated days and forgot
+        to say so — which is why an unenforced run is not silently equivalent to
+        a compliant one. Every run reports ``metrics["SessionCharterEnforced"]``
+        (0.0 here unless boundaries are supplied) alongside
+        ``metrics["SessionForcedCloses"]``. Check it before reading a P&L.
+
+        Callers that DID concatenate trading days should pass
+        ``day_boundaries``; ``DataLoader.load()`` already builds exactly this
+        list and ``LoadedData.to_backtest_data()`` threads it automatically.
 
         Args:
             prices: Mid-price series
@@ -805,13 +1096,16 @@ class Backtester:
             labels: True labels (optional)
             shifted: If predictions use shifted labels (0/1/2)
             metrics: Optional metrics
+            day_boundaries: Optional per-day ``(start_idx, end_idx)`` half-open
+                row ranges over ``prices``. Must tile ``[0, len(prices))``
+                exactly; a partial or overlapping list raises rather than being
+                guessed at.
 
         Returns:
             BacktestResult
         """
         from lobbacktest.strategies.direction import DirectionStrategy
 
-        data = BacktestData(prices=prices, labels=labels)
+        data = BacktestData(prices=prices, labels=labels, day_boundaries=day_boundaries)
         strategy = DirectionStrategy(predictions, shifted=shifted)
         return self.run(data, strategy, metrics)
-

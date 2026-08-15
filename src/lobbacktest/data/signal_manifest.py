@@ -21,6 +21,18 @@ schema alongside its peers (``FeatureSet``, ``Provenance``,
 producer/consumer agreement on the JSON shape in a single authoritative
 location.
 
+Agreement on the SHAPE, though, is not agreement on the IDENTITY. The
+producer also writes an 11-field ``CompatibilityContract`` (canonical home
+``hft_contracts.compatibility``) naming *which* signals these are — most
+sharply ``label_strategy_hash``, the identity of the dependent variable the
+model was fitted to. Measured 2026-08-15: that field was present in 9 of the
+19 signal manifests on disk and compared by nobody. The consumer side of
+that comparison lives in ``lobbacktest.experiment.ExperimentRunner.
+_expected_compatibility_fields`` (derived ``primary_horizon_idx`` + declared
+``signals.expect:``), NOT here — this module is a name-forwarding shim with
+no logic of its own. Deliberately not re-exported below: adding API surface
+to a shim already scheduled for deletion would create new callers to migrate.
+
 Phase 6 post-validation (2026-04-18): lazy ``__getattr__`` emits
 DeprecationWarning once per symbol access. Scheduled for removal in
 on ``_REMOVAL_DATE`` (``2026-10-31``).
@@ -37,24 +49,26 @@ _CANONICAL_MODULE = "hft_contracts.signal_manifest"
 # See hft-ops/src/hft_ops/provenance/lineage.py for rationale — 6 months
 # from Phase 6 6B.5.
 _REMOVAL_DATE = "2026-10-31"
-_PUBLIC_NAMES = frozenset({
-    # REV 2 public-API hygiene (2026-04-20): `CONTENT_HASH_RE` is the
-    # canonical public name; `_CONTENT_HASH_RE` is a hft-contracts-side
-    # deprecation shim (emits its own DeprecationWarning via PEP 562
-    # module-level __getattr__, removal 2026-10-31). Both retained here
-    # so pre-REV-2 and post-REV-2 importers via the backtester shim work.
-    "CONTENT_HASH_RE",
-    "_CONTENT_HASH_RE",
-    "ALIGNED_FILES",
-    "CLASSIFICATION_OPTIONAL",
-    "CLASSIFICATION_REQUIRED",
-    "ContractError",
-    "HYBRID_OPTIONAL",
-    "HYBRID_REQUIRED",
-    "REGRESSION_OPTIONAL",
-    "REGRESSION_REQUIRED",
-    "SignalManifest",
-})
+_PUBLIC_NAMES = frozenset(
+    {
+        # REV 2 public-API hygiene (2026-04-20): `CONTENT_HASH_RE` is the
+        # canonical public name; `_CONTENT_HASH_RE` is a hft-contracts-side
+        # deprecation shim (emits its own DeprecationWarning via PEP 562
+        # module-level __getattr__, removal 2026-10-31). Both retained here
+        # so pre-REV-2 and post-REV-2 importers via the backtester shim work.
+        "CONTENT_HASH_RE",
+        "_CONTENT_HASH_RE",
+        "ALIGNED_FILES",
+        "CLASSIFICATION_OPTIONAL",
+        "CLASSIFICATION_REQUIRED",
+        "ContractError",
+        "HYBRID_OPTIONAL",
+        "HYBRID_REQUIRED",
+        "REGRESSION_OPTIONAL",
+        "REGRESSION_REQUIRED",
+        "SignalManifest",
+    }
+)
 _WARNED: set[str] = set()
 
 
@@ -73,10 +87,9 @@ def __getattr__(name: str):
                 stacklevel=2,
             )
         import importlib
+
         return getattr(importlib.import_module(_CANONICAL_MODULE), name)
-    raise AttributeError(
-        f"module {__name__!r} has no attribute {name!r}"
-    )
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = sorted(_PUBLIC_NAMES)

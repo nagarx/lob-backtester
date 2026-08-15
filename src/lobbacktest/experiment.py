@@ -28,6 +28,7 @@ Reference:
     CLAUDE.md § Pipeline Overview
 """
 
+import dataclasses
 import json
 import warnings
 from dataclasses import dataclass, field
@@ -37,6 +38,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from hft_contracts.compatibility import CompatibilityContract
 from hft_contracts.signal_manifest import SignalManifest
 from lobbacktest.config import BacktestConfig, CostConfig, OpraCalibratedCosts, ZeroDteConfig
 from lobbacktest.engine.vectorized import BacktestData, VectorizedEngine
@@ -67,41 +69,54 @@ from lobbacktest.strategies.regression import RegressionStrategy, RegressionStra
 # ExperimentRunner — they lack `signals.dir` so the runner would crash before
 # reaching the gate); the fix is FUTURE-PROTECTION for operators copying the
 # YAML pattern.
-_KNOWN_BACKTEST_KEYS = frozenset({
-    # Fields consumed by _build_backtest_config + BacktestConfig dataclass schema
-    "initial_capital",
-    "position_size",
-    "max_position",
-    "costs",  # sub-dict; ExperimentRunner reads via CostConfig.for_exchange(exchange)
-    "zero_dte",  # nested location accepted per #PY-226 closure 2026-05-14
-    "allow_short",
-    "fill_price",
-    "stop_loss_pct",
-    "take_profit_pct",
-    "trading_days_per_year",
-    "periods_per_day",
-    "exchange",  # top-level override read by _build_backtest_config
-    # DEPRECATED — declared on BacktestConfig dataclass (config.py:312-313)
-    # but NOT consumed by _build_backtest_config + NOT read by engine. Live
-    # home for these gate values is the `strategy:` block (consumed by
-    # ReadabilityStrategy via _build_strategy:354-355). Listed here so the
-    # generic WARN does NOT fire (legacy schema acceptance), but
-    # _build_strategy emits a precise ValueError when readability strategy
-    # is built with these in the wrong block. Slated for removal 2026-10-31
-    # under separate cycle (see PHASE_P_BACKLOG.md #PY-NEW filed alongside
-    # this fix).
-    "min_confidence",
-    "min_agreement",
-})
+_KNOWN_BACKTEST_KEYS = frozenset(
+    {
+        # Fields consumed by _build_backtest_config + BacktestConfig dataclass schema
+        "initial_capital",
+        "position_size",
+        "max_position",
+        "costs",  # sub-dict; ExperimentRunner reads via CostConfig.for_exchange(exchange)
+        "zero_dte",  # nested location accepted per #PY-226 closure 2026-05-14
+        "allow_short",
+        "fill_price",
+        "stop_loss_pct",
+        "take_profit_pct",
+        "trading_days_per_year",
+        "periods_per_day",
+        "exchange",  # top-level override read by _build_backtest_config
+        # DEPRECATED — declared on BacktestConfig dataclass (config.py:312-313)
+        # but NOT consumed by _build_backtest_config + NOT read by engine. Live
+        # home for these gate values is the `strategy:` block (consumed by
+        # ReadabilityStrategy via _build_strategy:354-355). Listed here so the
+        # generic WARN does NOT fire (legacy schema acceptance), but
+        # _build_strategy emits a precise ValueError when readability strategy
+        # is built with these in the wrong block. Slated for removal 2026-10-31
+        # under separate cycle (see PHASE_P_BACKLOG.md #PY-NEW filed alongside
+        # this fix).
+        "min_confidence",
+        "min_agreement",
+    }
+)
 
 # Strategy-specific known keys, per _build_strategy branches. `type` is the
 # discriminator on every set.
-_KNOWN_STRATEGY_KEYS_REGRESSION = frozenset({
-    "type", "min_return_bps", "max_spread_bps", "primary_horizon_idx", "cooldown_events",
-})
-_KNOWN_STRATEGY_KEYS_READABILITY = frozenset({
-    "type", "min_agreement", "min_confidence", "max_spread_bps",
-})
+_KNOWN_STRATEGY_KEYS_REGRESSION = frozenset(
+    {
+        "type",
+        "min_return_bps",
+        "max_spread_bps",
+        "primary_horizon_idx",
+        "cooldown_events",
+    }
+)
+_KNOWN_STRATEGY_KEYS_READABILITY = frozenset(
+    {
+        "type",
+        "min_agreement",
+        "min_confidence",
+        "max_spread_bps",
+    }
+)
 _KNOWN_STRATEGY_KEYS_DIRECTION = frozenset({"type", "shifted"})
 
 _STRATEGY_KEY_SETS: Dict[str, frozenset] = {
@@ -111,13 +126,32 @@ _STRATEGY_KEY_SETS: Dict[str, frozenset] = {
 }
 
 # Holding policy keys, per _build_holding_policy.
-_KNOWN_HOLDING_KEYS = frozenset({
-    "type", "hold_events", "stop_loss_bps", "take_profit_bps",
-})
+_KNOWN_HOLDING_KEYS = frozenset(
+    {
+        "type",
+        "hold_events",
+        "stop_loss_bps",
+        "take_profit_bps",
+    }
+)
+
+# `signals:` block keys. Until 2026-08-15 this block was read for `dir` ONLY
+# (`run()`), with no unknown-key diagnostic — so a typo'd `signals.expects:`
+# was silently ignored. Enumerated here so `_warn_unknown_yaml_keys` covers it
+# like every other block (FIND-070 idiom).
+_KNOWN_SIGNALS_KEYS = frozenset({"dir", "expect"})
+
+# The 11 identity fields of the producer-side CompatibilityContract, derived
+# from the dataclass itself rather than re-typed here. hft-rules §1: the
+# contract has ONE home (`hft_contracts.compatibility`); a hand-copied list
+# would drift silently the first time a field is added upstream.
+_CONTRACT_FIELD_NAMES = frozenset(f.name for f in dataclasses.fields(CompatibilityContract))
 
 
 def _warn_unknown_yaml_keys(
-    block_name: str, raw: Dict[str, Any], known: frozenset,
+    block_name: str,
+    raw: Dict[str, Any],
+    known: frozenset,
 ) -> None:
     """Emit ``RuntimeWarning`` when ``raw`` has keys not in ``known``.
 
@@ -266,23 +300,32 @@ class ExperimentRunner:
             ExperimentResult with all runs and their metrics.
         """
         # 1. Load signals
-        signal_dir = Path(self.config.get("signals", {}).get("dir", ""))
+        signals_block = self.config.get("signals", {}) or {}
+        _warn_unknown_yaml_keys("signals", signals_block, _KNOWN_SIGNALS_KEYS)
+        signal_dir = Path(signals_block.get("dir", ""))
+
+        # Read the manifest BEFORE validating. It is needed twice: for
+        # provenance (as always) and — since 2026-08-15 — to decide which
+        # expectations are checkable. Ordering matters: an expectation about a
+        # field the producer never declared must be grandfathered, and that
+        # cannot be known without the manifest in hand. Pure read; safe to hoist.
+        signal_metadata = self._load_signal_metadata(signal_dir)
+
         # Phase II hardening SB-1 (2026-04-20): wire backtester consumer-side
-        # CompatibilityContract partial assertion. The backtester only knows
-        # `primary_horizon_idx` (from strategy config) — all other fields
-        # (feature_count, window_size, label_strategy, etc.) are trainer-side
-        # facts that the backtester trusts via the manifest's producer
-        # fingerprint self-check. Supplying expected_fields here catches the
-        # silent-version-skew case where a backtester configured for H10
-        # accidentally loads signals produced for H60 (different
+        # CompatibilityContract partial assertion. `primary_horizon_idx` is
+        # DERIVED from the strategy config; every other field must be DECLARED
+        # under `signals.expect:` (the backtester cannot compute a
+        # label_strategy_hash). Anything neither derived nor declared is still
+        # trusted via the manifest's producer fingerprint self-check. This
+        # catches the silent-version-skew case where a backtester configured
+        # for H10 accidentally loads signals produced for H60 (different
         # primary_horizon_idx, identical producer fingerprint).
-        expected_fields = self._expected_compatibility_fields()
+        expected_fields = self._expected_compatibility_fields(
+            manifest_compat=signal_metadata.get("compatibility"),
+        )
         data = BacktestData.from_signal_dir(
             str(signal_dir), validate=True, expected_fields=expected_fields
         )
-
-        # Load signal metadata for provenance
-        signal_metadata = self._load_signal_metadata(signal_dir)
 
         # 2. Build base config
         backtest_cfg = self._build_backtest_config()
@@ -290,14 +333,14 @@ class ExperimentRunner:
         # 3. Determine strategy params
         strategy_config = self.config.get("strategy", {})
         strategy_type = strategy_config.get("type", "regression")
-        base_params = {
-            k: v for k, v in strategy_config.items() if k != "type"
-        }
+        base_params = {k: v for k, v in strategy_config.items() if k != "type"}
 
         # 4. Check for sweep
         sweep_config = self.config.get("sweep", {})
         if sweep_config:
-            runs = self._run_sweep(data, backtest_cfg, strategy_type, base_params, sweep_config, signal_metadata)
+            runs = self._run_sweep(
+                data, backtest_cfg, strategy_type, base_params, sweep_config, signal_metadata
+            )
         else:
             run = self._run_single(data, backtest_cfg, strategy_type, base_params, signal_metadata)
             runs = [run]
@@ -332,7 +375,11 @@ class ExperimentRunner:
             for value in values:
                 params = {**base_params, param_name: value}
                 run = self._run_single(
-                    data, backtest_cfg, strategy_type, params, signal_metadata,
+                    data,
+                    backtest_cfg,
+                    strategy_type,
+                    params,
+                    signal_metadata,
                 )
                 run["sweep_param"] = param_name
                 run["sweep_value"] = value
@@ -406,7 +453,9 @@ class ExperimentRunner:
             metrics=result.metrics,
             signal_metadata=signal_metadata,
             option_metrics=option_metrics if option_metrics else None,
-            equity_curve=result.equity_curve if output_config.get("save_equity_curve", False) else None,
+            equity_curve=result.equity_curve
+            if output_config.get("save_equity_curve", False)
+            else None,
         )
 
         return {
@@ -420,30 +469,116 @@ class ExperimentRunner:
             "final_equity": result.final_equity,
         }
 
-    def _expected_compatibility_fields(self) -> Optional[Dict[str, Any]]:
+    def _expected_compatibility_fields(
+        self,
+        manifest_compat: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
         """Derive consumer-side partial CompatibilityContract assertion from config.
 
-        Phase II hardening SB-1 (2026-04-20): the backtester only knows a
-        narrow subset of the 11 shape-determining fields. Expose what it
-        knows (``primary_horizon_idx`` from the regression-strategy config)
-        for SignalManifest.validate() to cross-check against the manifest's
-        compatibility block. Returns None when no field is assertable
-        (e.g., classification-strategy path — primary_horizon_idx is
-        unused).
+        Phase II hardening SB-1 (2026-04-20) wired exactly ONE field —
+        ``primary_horizon_idx`` — because it is the only contract field the
+        backtester can *derive*. That stayed true, and it is why this consumer
+        asserted essentially nothing for four months: the other ten fields
+        (``label_strategy_hash``, ``feature_count``, ``window_size``, …) are
+        trainer-side facts the backtester has no way to compute.
 
-        Cautious design: only assert fields that the backtester config
-        actively declares. Asserting on defaults (e.g., primary_horizon_idx=0
-        always) would surface false positives on legitimate multi-horizon
-        exports where the user just didn't override the default.
+        2026-08-15 (R3): a field the consumer cannot DERIVE it can still
+        DECLARE. The `signals.expect:` block lets the operator pin any of the
+        11 contract fields explicitly::
+
+            signals:
+              dir: "…/signals/test"
+              expect:
+                label_strategy_hash: "7299e11a…"   # 64-hex, from the trainer
+                feature_count: 98
+
+        The governing principle: **if the config states an expectation about
+        the signals it consumes, that expectation is ASSERTED, not assumed.**
+        Nothing is asserted by default — a field absent from both the strategy
+        config and `signals.expect:` is still trusted via the manifest's own
+        producer fingerprint, exactly as before.
+
+        Args:
+            manifest_compat: The manifest's ``compatibility`` block, when
+                already loaded. Used only for per-field grandfathering (see
+                below). ``None`` disables that filtering — the historical
+                no-arg call shape is preserved.
+
+        Returns:
+            Non-empty dict of field→expected value, or ``None`` when nothing
+            is assertable. (``SignalManifest.validate`` rejects an empty dict
+            as a caller-side logic error, so ``None`` is the correct "no
+            assertions" signal.)
+
+        Raises:
+            ValueError: ``signals.expect:`` names a key that is not a
+                CompatibilityContract field (typo defence — fail loud per
+                hft-rules §5), or an explicit declaration contradicts the
+                value derived from the strategy config.
         """
         strategy_config = self.config.get("strategy", {})
         strategy_type = strategy_config.get("type", "regression")
         expected: Dict[str, Any] = {}
 
+        # --- (1) DERIVED: the one field the backtester computes itself. ---
         # RegressionStrategy knows primary_horizon_idx; only assert when the
         # user explicitly set it in config (not accepting the class default).
         if strategy_type == "regression" and "primary_horizon_idx" in strategy_config:
             expected["primary_horizon_idx"] = strategy_config["primary_horizon_idx"]
+
+        # --- (2) DECLARED: `signals.expect:` operator assertions. ---
+        signals_block = self.config.get("signals", {}) or {}
+        declared = signals_block.get("expect") or {}
+        if declared:
+            unknown = set(declared) - _CONTRACT_FIELD_NAMES
+            if unknown:
+                raise ValueError(
+                    f"`signals.expect:` names non-contract field(s) "
+                    f"{sorted(unknown)!r}. Valid fields: "
+                    f"{sorted(_CONTRACT_FIELD_NAMES)!r}. This is a config bug — "
+                    f"an unrecognised key would otherwise assert nothing at all."
+                )
+            # A declaration that contradicts the derived value is ambiguous:
+            # we cannot know which the operator meant. Fail rather than pick.
+            for key, declared_val in declared.items():
+                if key in expected and expected[key] != declared_val:
+                    raise ValueError(
+                        f"Config contradicts itself on `{key}`: "
+                        f"strategy.{key}={expected[key]!r} but "
+                        f"signals.expect.{key}={declared_val!r}. "
+                        f"Remove one."
+                    )
+            expected.update(declared)
+
+        # --- (3) GRANDFATHER ON ABSENCE, FAIL ON DISAGREEMENT. ---
+        # Three contract fields are optional on the producer side
+        # (`_compatibility_from_dict` reads calibration_method /
+        # primary_horizon_idx / horizons with .get(), so they arrive as None),
+        # and `calibration_method` is None on 8 of the 9 signal dirs currently
+        # on disk. Upstream compares with `!=`, so None-vs-expected reads as a
+        # MISMATCH and raises — i.e. asserting such a field would hard-fail a
+        # historical export for a fact its producer never claimed.
+        #
+        # ABSENCE is not disagreement: the producer said nothing, so there is
+        # nothing to contradict. We drop those expectations here and WARN that
+        # the check did not run. A field PRESENT on both sides and differing is
+        # left in place and hard-errors upstream — that is a real version skew.
+        if manifest_compat is not None and expected:
+            ungrandfathered = {
+                k: v for k, v in expected.items() if manifest_compat.get(k) is not None
+            }
+            skipped = sorted(set(expected) - set(ungrandfathered))
+            if skipped:
+                warnings.warn(
+                    f"Signal manifest does not declare {skipped!r}; those "
+                    f"expectations were NOT verified (grandfathered — the "
+                    f"producer predates the field). Fields still checked: "
+                    f"{sorted(ungrandfathered)!r}. Re-export signals with a "
+                    f"current trainer to enable the full check.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+            expected = ungrandfathered
 
         # Future-extensibility: if other strategies gain shape-determining
         # knowledge (e.g., hybrid strategy explicitly declares horizons), add
@@ -453,7 +588,10 @@ class ExperimentRunner:
         return expected if expected else None
 
     def _build_strategy(
-        self, data: BacktestData, strategy_type: str, params: dict,
+        self,
+        data: BacktestData,
+        strategy_type: str,
+        params: dict,
     ):
         """Build strategy from type + params. Reuses existing classes.
 
@@ -472,10 +610,7 @@ class ExperimentRunner:
         # bottom-of-method ValueError (more actionable) so we suppress the
         # generic WARN in that case to keep the operator-facing diagnostic clean.
         strategy_block = self.config.get("strategy", {})
-        if (
-            isinstance(strategy_block, dict)
-            and strategy_type in _STRATEGY_KEY_SETS
-        ):
+        if isinstance(strategy_block, dict) and strategy_type in _STRATEGY_KEY_SETS:
             known_for_type = _STRATEGY_KEY_SETS[strategy_type]
             _warn_unknown_yaml_keys("strategy", strategy_block, known_for_type)
 
@@ -636,9 +771,7 @@ class ExperimentRunner:
         """
         top_zd = self.config.get("zero_dte")
         backtest_block = self.config.get("backtest", {})
-        nested_zd = (
-            backtest_block.get("zero_dte") if isinstance(backtest_block, dict) else None
-        )
+        nested_zd = backtest_block.get("zero_dte") if isinstance(backtest_block, dict) else None
 
         if top_zd and nested_zd:
             raise ValueError(

@@ -95,11 +95,22 @@ class LoadedData:
         """
         Convert to BacktestData for backtesting.
 
+        Threads ``day_boundaries`` through to the engine (2026-08-15). Until
+        this date the loader BUILT that list and nothing ever read it: the five
+        occurrences of ``day_boundaries`` in the module were all construction.
+        Meanwhile ``load()`` concatenates every day into one continuous price
+        array, so the engine saw no day edges and a position opened near a day's
+        end carried into the next day — booking the overnight gap as intraday
+        P&L, in direct violation of the programme's one hard portfolio
+        constraint. Passing the boundaries here is what arms the force-close in
+        ``VectorizedEngine.run``; see that docstring for the enforcement and its
+        two observability metrics.
+
         Args:
             horizon_idx: Which horizon to use for labels (if multi-horizon)
 
         Returns:
-            BacktestData instance
+            BacktestData instance, charter-armed
         """
         labels = self.labels
         if labels.ndim == 2:
@@ -109,6 +120,7 @@ class LoadedData:
         return BacktestData(
             prices=self.prices,
             labels=labels,
+            day_boundaries=self.day_boundaries,
         )
 
 
@@ -223,22 +235,14 @@ class DataLoader:
                     f"(Phase O Cycle 1+)."
                 )
             try:
-                warnings = validate_export_contract(
-                    metadata, strict_completeness=False
-                )
+                warnings = validate_export_contract(metadata, strict_completeness=False)
             except ContractError as exc:
-                raise ContractError(
-                    f"Export contract violation for {date}: {exc}"
-                ) from exc
+                raise ContractError(f"Export contract violation for {date}: {exc}") from exc
             for w in warnings:
                 logger.warning("Contract warning (%s): %s", date, w)
 
             norm_file = split_dir / f"{date}_normalization.json"
-            norm_params = (
-                NormalizationParams.from_json(norm_file)
-                if norm_file.exists()
-                else None
-            )
+            norm_params = NormalizationParams.from_json(norm_file) if norm_file.exists() else None
 
             extractor = PriceExtractor(norm_params)
             prices = extractor.extract_mid_prices(sequences, denormalize=True)
@@ -314,22 +318,14 @@ class DataLoader:
                 f"(Phase O Cycle 1+)."
             )
         try:
-            warnings = validate_export_contract(
-                metadata, strict_completeness=False
-            )
+            warnings = validate_export_contract(metadata, strict_completeness=False)
         except ContractError as exc:
-            raise ContractError(
-                f"Export contract violation for {date}: {exc}"
-            ) from exc
+            raise ContractError(f"Export contract violation for {date}: {exc}") from exc
         for w in warnings:
             logger.warning("Contract warning (%s): %s", date, w)
 
         norm_file = split_dir / f"{date}_normalization.json"
-        norm_params = (
-            NormalizationParams.from_json(norm_file)
-            if norm_file.exists()
-            else None
-        )
+        norm_params = NormalizationParams.from_json(norm_file) if norm_file.exists() else None
 
         extractor = PriceExtractor(norm_params)
         prices = extractor.extract_mid_prices(sequences, denormalize=True)
@@ -365,4 +361,3 @@ class DataLoader:
             with open(manifest_file) as f:
                 return json.load(f)
         return None
-
